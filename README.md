@@ -8,6 +8,8 @@
 ./gradlew run
 ```
 
+- for now supported os is mac arm
+
 #### List
 - [x] Device list.
 - [x] Device Information
