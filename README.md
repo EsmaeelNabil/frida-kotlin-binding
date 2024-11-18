@@ -1,6 +1,6 @@
 ### Frida Kotlin Binding
 
-##### Kotlin, Swig and gradle implementation for porting [frida](https://github.com/frida/frida-core) to [kotlin](https://github.com/EsmaeelNabil/frida-kotlin-binding).
+##### Kotlin, Swig and gradle implementation for porting [frida](https://github.com/frida/frida-core) to [kotlin](https://github.com/EsmaeelNabil/frida-kotlin-binding) jvm.
 
 
 ```bash
