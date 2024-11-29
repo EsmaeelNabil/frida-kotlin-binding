@@ -1,21 +1,15 @@
 package dev.supersam.app
 
-import NativeLoader
-import dev.supersam.frida.Frida
-import dev.supersam.fridaSource.FridaDeviceType
+import dev.supersam.frida.FridaDeviceType
+import dev.supersam.frida.enumerateApplications
+import dev.supersam.frida.enumerateDevices
 
 fun main() {
-    NativeLoader.load()
-
-    Frida.enumerateDevices().forEach {
-        println("Device: ${it.name} (${it.id})")
-        if (it.type == FridaDeviceType.FRIDA_DEVICE_TYPE_USB)
-            try {
-                Frida.enumerateApplications(it.id).forEach {
-                    println("$it")
-                }
-            } catch (e: Exception) {
-                println("Error: ${e.message}")
+    enumerateDevices().forEach {
+        if (it.type == FridaDeviceType.FRIDA_DEVICE_TYPE_USB) {
+            it.enumerateApplications().forEach {
+                println(it)
             }
+        }
     }
 }

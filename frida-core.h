@@ -58865,7 +58865,8 @@ void frida_device_enumerate_applications (FridaDevice * self, FridaApplicationQu
 FridaApplicationList * frida_device_enumerate_applications_finish (FridaDevice * self, GAsyncResult * result, GError ** error);
 FridaApplicationList * frida_device_enumerate_applications_sync (FridaDevice * self, FridaApplicationQueryOptions * options, GCancellable * cancellable, GError ** error);
 void frida_device_get_process_by_pid (FridaDevice * self, guint pid, FridaProcessMatchOptions * options, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
-FridaProcess * frida_device_get_process_by_pid_finish (FridaDevice * self, GAsyncResult * result, GError ** error);
+FridaProcess * frida_device_get_process_by_pid_finish (FridaD
+evice * self, GAsyncResult * result, GError ** error);
 FridaProcess * frida_device_get_process_by_pid_sync (FridaDevice * self, guint pid, FridaProcessMatchOptions * options, GCancellable * cancellable, GError ** error);
 void frida_device_get_process_by_name (FridaDevice * self, const gchar * name, FridaProcessMatchOptions * options, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 FridaProcess * frida_device_get_process_by_name_finish (FridaDevice * self, GAsyncResult * result, GError ** error);
