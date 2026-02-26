@@ -1,0 +1,14 @@
+[
+  {
+    "id": "T030",
+    "title": "Rename :frida → :frida-jvm, implement :frida-api interfaces",
+    "description": "Rename the :frida module directory to :frida-jvm, update settings.gradle.kts, app/build.gradle.kts, and all cross-module references. Make FridaDevice, FridaSession, FridaScript implement the corresponding interfaces from :frida-api. Add :frida-api as a dependency of :frida-jvm. Remove duplicate model classes from :frida-jvm.",
+    "status": "done"
+  },
+  {
+    "id": "T031",
+    "title": "Add iOS Kotlin/Native Cinterop module :frida-ios",
+    "description": "Create :frida-ios module using Kotlin/Native cinterop against frida_core.h / libfrida-core.a for iosArm64/iosSimulatorArm64. Implement IFridaDevice, IFridaSession, IFridaScript using cinterop-generated bindings. Use StableRef<T> for GObject signal callbacks. Modify download_frida_devkit.sh to accept OS=ios.",
+    "status": "done"
+  }
+]

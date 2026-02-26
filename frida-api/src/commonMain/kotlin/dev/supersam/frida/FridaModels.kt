@@ -59,12 +59,22 @@ enum class ChildOrigin(val value: Int) {
 }
 
 /**
- * An opaque V8 heap snapshot produced by [FridaSession.snapshotScript].
- * Pass it to [FridaSession.createScriptFromSnapshot] to create a script with
+ * An opaque V8 heap snapshot produced by [IFridaSession.snapshotScript].
+ * Pass it to [IFridaSession.createScriptFromSnapshot] to create a script with
  * pre-initialized state, which starts significantly faster than a cold script.
  */
-@JvmInline
-value class ScriptSnapshot(val bytes: ByteArray)
+data class ScriptSnapshot(val bytes: ByteArray) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other == null || this::class != other::class) return false
+        other as ScriptSnapshot
+        return bytes.contentEquals(other.bytes)
+    }
+
+    override fun hashCode(): Int {
+        return bytes.contentHashCode()
+    }
+}
 
 /**
  * Typed representation of a Frida script message.

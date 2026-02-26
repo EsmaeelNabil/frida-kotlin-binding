@@ -8,7 +8,7 @@ package dev.supersam.frida
  *   {"type":"error", "description":"...", "stack":"...", "fileName":"...", "lineNumber":<int>}
  *   {"type":"log",   "level":"info|warning|error", "payload":"..."}
  */
-internal object FridaMessageParser {
+object FridaMessageParser {
 
     fun parse(json: String): ScriptMessage {
         val type = extractString(json, "type") ?: return ScriptMessage.Raw(json)

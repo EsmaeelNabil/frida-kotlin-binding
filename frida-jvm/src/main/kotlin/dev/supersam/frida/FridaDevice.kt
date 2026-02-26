@@ -6,15 +6,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 
-class FridaDevice(val handle: Long) {
+class FridaDevice(val handle: Long) : IFridaDevice {
 
-    val id: String get() = FridaNative.deviceGetId(handle)
-    val name: String get() = FridaNative.deviceGetName(handle)
-    val type: DeviceType get() = DeviceType.fromInt(FridaNative.deviceGetType(handle))
+    override val id: String get() = FridaNative.deviceGetId(handle)
+    override val name: String get() = FridaNative.deviceGetName(handle)
+    override val type: DeviceType get() = DeviceType.fromInt(FridaNative.deviceGetType(handle))
 
     // ---- enumeration ----
 
-    suspend fun enumerateApplications(scope: Scope = Scope.MINIMAL): List<Application> =
+    override suspend fun enumerateApplications(scope: Scope): List<Application> =
         withContext(Dispatchers.IO) {
             FridaNative.deviceEnumerateApplications(handle, scope.value).map { h ->
                 Application(
@@ -25,7 +25,7 @@ class FridaDevice(val handle: Long) {
             }
         }
 
-    suspend fun enumerateProcesses(scope: Scope = Scope.MINIMAL): List<Process> =
+    override suspend fun enumerateProcesses(scope: Scope): List<Process> =
         withContext(Dispatchers.IO) {
             FridaNative.deviceEnumerateProcesses(handle, scope.value).map { h ->
                 Process(
@@ -37,21 +37,21 @@ class FridaDevice(val handle: Long) {
 
     // ---- process control ----
 
-    suspend fun attach(pid: Int): FridaSession = withContext(Dispatchers.IO) {
+    override suspend fun attach(pid: Int): FridaSession = withContext(Dispatchers.IO) {
         FridaSession(FridaNative.deviceAttach(handle, pid))
     }
 
-    suspend fun attach(bundleId: String): FridaSession {
+    override suspend fun attach(bundleId: String): FridaSession {
         val app = enumerateApplications().firstOrNull { it.identifier == bundleId }
             ?: throw IllegalArgumentException("Application not found: $bundleId")
         return attach(app.pid)
     }
 
-    suspend fun spawn(program: String): Int = withContext(Dispatchers.IO) {
+    override suspend fun spawn(program: String): Int = withContext(Dispatchers.IO) {
         FridaNative.deviceSpawn(handle, program)
     }
 
-    suspend fun resume(pid: Int) = withContext(Dispatchers.IO) {
+    override suspend fun resume(pid: Int) = withContext(Dispatchers.IO) {
         FridaNative.deviceResume(handle, pid)
     }
 
@@ -62,16 +62,16 @@ class FridaDevice(val handle: Long) {
      * After calling this, collect [childAdded] to receive each new child,
      * then call [resume] on the child's PID to continue execution.
      */
-    suspend fun enableSpawnGating() = withContext(Dispatchers.IO) {
+    override suspend fun enableSpawnGating() = withContext(Dispatchers.IO) {
         FridaNative.deviceEnableSpawnGating(handle)
     }
 
-    suspend fun disableSpawnGating() = withContext(Dispatchers.IO) {
+    override suspend fun disableSpawnGating() = withContext(Dispatchers.IO) {
         FridaNative.deviceDisableSpawnGating(handle)
     }
 
     /** Returns all children currently paused by spawn gating. */
-    suspend fun enumeratePendingChildren(): List<FridaChild> = withContext(Dispatchers.IO) {
+    override suspend fun enumeratePendingChildren(): List<FridaChild> = withContext(Dispatchers.IO) {
         FridaNative.deviceEnumeratePendingChildren(handle).map { h ->
             readChild(h).also { FridaNative.unref(h) }
         }
@@ -83,7 +83,7 @@ class FridaDevice(val handle: Long) {
      * Emits every time a new child process is created (requires [enableSpawnGating]).
      * The child is paused — call [resume] with its PID to let it continue.
      */
-    val childAdded: Flow<FridaChild> = callbackFlow {
+    override val childAdded: Flow<FridaChild> = callbackFlow {
         val cb = FridaNative.ChildCallback { h ->
             trySend(readChild(h).also { FridaNative.unref(h) })
         }
@@ -94,7 +94,7 @@ class FridaDevice(val handle: Long) {
     /**
      * Emits every time a previously-gated child is removed (resumed or killed).
      */
-    val childRemoved: Flow<FridaChild> = callbackFlow {
+    override val childRemoved: Flow<FridaChild> = callbackFlow {
         val cb = FridaNative.ChildCallback { h ->
             trySend(readChild(h).also { FridaNative.unref(h) })
         }

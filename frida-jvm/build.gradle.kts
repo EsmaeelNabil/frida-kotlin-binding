@@ -19,6 +19,7 @@ java {
 dependencies {
     testImplementation(kotlin("test"))
     api(libs.kotlinx.coroutines.core)
+    api(project(":frida-api"))
 }
 
 tasks.test {

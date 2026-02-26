@@ -6,13 +6,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 
-class FridaSession(val handle: Long) {
+class FridaSession(val handle: Long) : IFridaSession {
 
     /**
      * Emits once when the session is detached, then closes.
      * Backed by the Frida "detached" GObject signal.
      */
-    val detached: Flow<DetachReason> = callbackFlow {
+    override val detached: Flow<DetachReason> = callbackFlow {
         val callback = FridaNative.DetachedCallback { reason ->
             trySend(DetachReason.fromInt(reason))
             close()
@@ -23,7 +23,7 @@ class FridaSession(val handle: Long) {
         }
     }
 
-    suspend fun createScript(source: String): FridaScript = withContext(Dispatchers.IO) {
+    override suspend fun createScript(source: String): FridaScript = withContext(Dispatchers.IO) {
         FridaScript(FridaNative.sessionCreateScript(handle, source))
     }
 
@@ -35,9 +35,9 @@ class FridaSession(val handle: Long) {
      * @param embedScript  JavaScript that populates the heap (e.g. `require` calls, class defs).
      * @param warmupScript Optional script run after [embedScript] to warm up JIT compiled code.
      */
-    suspend fun snapshotScript(
+    override suspend fun snapshotScript(
         embedScript: String,
-        warmupScript: String? = null
+        warmupScript: String?
     ): ScriptSnapshot = withContext(Dispatchers.IO) {
         ScriptSnapshot(FridaNative.sessionSnapshotScript(handle, embedScript, warmupScript ?: ""))
     }
@@ -46,14 +46,14 @@ class FridaSession(val handle: Long) {
      * Creates a script that starts from the pre-initialized state captured in [snapshot].
      * [source] is optional runtime JavaScript layered on top of the snapshot's heap.
      */
-    suspend fun createScriptFromSnapshot(
+    override suspend fun createScriptFromSnapshot(
         snapshot: ScriptSnapshot,
-        source: String = ""
+        source: String
     ): FridaScript = withContext(Dispatchers.IO) {
         FridaScript(FridaNative.sessionCreateScriptFromSnapshot(handle, source, snapshot.bytes))
     }
 
-    suspend fun detach() = withContext(Dispatchers.IO) {
+    override suspend fun detach() = withContext(Dispatchers.IO) {
         FridaNative.sessionDetach(handle)
         FridaNative.unref(handle)
     }
