@@ -12,10 +12,13 @@ class Frida {
             frida.frida_init()
         }
 
+        private val manager by lazy {
+            frida.frida_device_manager_new()
+        }
+
         fun enumerateApplications(appId: String): List<Application> {
             val appsIdentifiers = mutableListOf<Application>()
 
-            val manager = frida.frida_device_manager_new()
             val device = frida.frida_device_manager_get_device_by_id_sync(manager, appId, 0)
 
             val option = frida.frida_application_query_options_new()
@@ -40,7 +43,6 @@ class Frida {
         fun enumerateDevices(): List<Device> {
             val devices = mutableListOf<Device>()
 
-            val manager = frida.frida_device_manager_new()
             val deviceList = frida.frida_device_manager_enumerate_devices_sync(manager)
             val size = frida.frida_device_list_size(deviceList)
             for (i in 0 until size) {
