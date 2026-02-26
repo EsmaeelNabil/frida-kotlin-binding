@@ -1,73 +1,59 @@
 package dev.supersam.frida
 
-import dev.supersam.fridaSource.FridaDeviceType
-import dev.supersam.fridaSource.FridaScope
-import dev.supersam.fridaSource.SWIGTYPE_p__FridaApplicationQueryOptions
-import dev.supersam.fridaSource.frida
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.withContext
 
-class Frida {
-    companion object {
-        init {
-            NativeLoader.load()
-            frida.frida_init()
-        }
+object Frida {
 
-        fun enumerateApplications(appId: String): List<Application> {
-            val appsIdentifiers = mutableListOf<Application>()
-
-            val manager = frida.frida_device_manager_new()
-            val device = frida.frida_device_manager_get_device_by_id_sync(manager, appId, 0)
-
-            val type = frida.frida_device_get_dtype(device)
-                val option = frida.frida_application_query_options_new()
-                frida.frida_application_query_options_set_scope(option, FridaScope.FRIDA_SCOPE_FULL)
-                val apps = frida.frida_device_enumerate_applications_sync(device, option)
-                val appsSize = frida.frida_application_list_size(apps)
-                for (i in 0 until appsSize) {
-                    val app = frida.frida_application_list_get(apps, i)
-
-                    appsIdentifiers.add(
-                        Application(
-                            name = frida.frida_application_get_name(app),
-                            identifier = frida.frida_application_get_identifier(app),
-                            pid = frida.frida_application_get_pid(app)
-                        )
-                    )
-                }
-
-            return appsIdentifiers
-        }
-
-        fun enumerateDevices(): List<Device> {
-            val devices = mutableListOf<Device>()
-
-            val manager = frida.frida_device_manager_new()
-            val deviceList = frida.frida_device_manager_enumerate_devices_sync(manager)
-            val size = frida.frida_device_list_size(deviceList)
-            for (i in 0 until size) {
-                val device = frida.frida_device_list_get(deviceList, i)
-                devices.add(
-                    Device(
-                        id = frida.frida_device_get_id(device),
-                        name = frida.frida_device_get_name(device),
-                        type = frida.frida_device_get_dtype(device)
-                    )
-                )
-            }
-
-            return devices
-        }
+    private val deviceManagerHandle: Long by lazy {
+        NativeLoader.load()
+        FridaNative.fridaInit()
+        FridaNative.deviceManagerNew()
     }
 
-    data class Device(
-        val id: String,
-        val name: String,
-        val type: FridaDeviceType = FridaDeviceType.FRIDA_DEVICE_TYPE_LOCAL
-    )
+    // ---- enumeration ----
 
-    data class Application(
-        val identifier: String,
-        val name: String,
-        val pid : Long
-    )
+    suspend fun enumerateDevices(): List<FridaDevice> = withContext(Dispatchers.IO) {
+        FridaNative.deviceManagerEnumerateDevices(deviceManagerHandle)
+            .map { FridaDevice(it) }
+    }
+
+    suspend fun getDevice(id: String, timeout: Int = 0): FridaDevice = withContext(Dispatchers.IO) {
+        FridaDevice(FridaNative.deviceManagerGetDeviceById(deviceManagerHandle, id, timeout))
+    }
+
+    // ---- device list signals ----
+
+    /** Emits a [FridaDevice] whenever a new device is connected. */
+    val deviceAdded: Flow<FridaDevice> = callbackFlow {
+        val cb = FridaNative.DeviceCallback { h -> trySend(FridaDevice(h)) }
+        val cbHandle = FridaNative.deviceManagerConnectAdded(deviceManagerHandle, cb)
+        awaitClose { FridaNative.deviceManagerDisconnectAdded(deviceManagerHandle, cbHandle) }
+    }
+
+    /** Emits a [FridaDevice] whenever a device is disconnected. */
+    val deviceRemoved: Flow<FridaDevice> = callbackFlow {
+        val cb = FridaNative.DeviceCallback { h -> trySend(FridaDevice(h)) }
+        val cbHandle = FridaNative.deviceManagerConnectRemoved(deviceManagerHandle, cb)
+        awaitClose { FridaNative.deviceManagerDisconnectRemoved(deviceManagerHandle, cbHandle) }
+    }
+
+    /**
+     * Emits [Unit] whenever the device list changes (device added or removed).
+     * Simpler alternative to collecting both [deviceAdded] and [deviceRemoved].
+     */
+    val deviceChanged: Flow<Unit> = callbackFlow {
+        val cb = FridaNative.ChangedCallback { trySend(Unit) }
+        val cbHandle = FridaNative.deviceManagerConnectChanged(deviceManagerHandle, cb)
+        awaitClose { FridaNative.deviceManagerDisconnectChanged(deviceManagerHandle, cbHandle) }
+    }
+
+    // ---- lifecycle ----
+
+    fun shutdown() {
+        FridaNative.fridaShutdown()
+    }
 }

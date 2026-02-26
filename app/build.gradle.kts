@@ -5,7 +5,6 @@ plugins {
 
 group = "dev.supersam"
 
-
 repositories {
     mavenCentral()
 }
@@ -20,16 +19,13 @@ application {
     mainClass = "dev.supersam.app.AppKt"
 }
 
-
 dependencies {
     implementation(libs.guava)
     implementation(projects.frida)
+    implementation(libs.kotlinx.coroutines.core)
 }
 
 tasks.named<JavaExec>("run") {
-    // Set the path to where the native library is located
     systemProperty("java.library.path", "${project(":frida").projectDir}/src/main/cpp/build")
-
-    // Ensure the native library is built and copied before running
     dependsOn(":frida:copyNativeLib")
 }

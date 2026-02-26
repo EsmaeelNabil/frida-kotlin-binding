@@ -1,32 +1,44 @@
+package dev.supersam.frida
+
 import java.nio.file.Files
-import java.util.*
+import java.util.Locale
 
 object NativeLoader {
-    init {
-        val osName = System.getProperty("os.name").lowercase(Locale.getDefault())
-        val osDir = when {
-            osName.contains("mac") -> "macos"
-            osName.contains("linux") -> "linux"
-            osName.contains("windows") -> "windows"
-            else -> throw UnsupportedOperationException("Unsupported operating system: $osName")
-        }
 
-        val libName = "libfrida_wrapper.dylib"
-        val resourcePath = "/native/$osDir/$libName"
-
-        val stream = NativeLoader::class.java.getResourceAsStream(resourcePath)
-            ?: throw IllegalStateException("Could not find native library at $resourcePath")
-
-        val tempFile = Files.createTempFile("frida_wrapper", ".dylib").toFile()
-        tempFile.deleteOnExit()
-        stream.use { it.copyTo(tempFile.outputStream()) }
-
-        println("Loading library from: ${tempFile.absolutePath}")
-        System.load(tempFile.absolutePath)
-        println("Library loaded successfully")
-    }
+    @Volatile private var loaded = false
 
     fun load() {
-        // The init block will handle the loading
+        if (loaded) return
+        synchronized(this) {
+            if (loaded) return
+            loadNativeLibrary()
+            loaded = true
+        }
+    }
+
+    private fun loadNativeLibrary() {
+        // In development, java.library.path points to the CMake build dir
+        try {
+            System.loadLibrary("frida_wrapper")
+            return
+        } catch (e: UnsatisfiedLinkError) {
+            // fall through to classpath extraction
+        }
+
+        val osName = System.getProperty("os.name").lowercase(Locale.getDefault())
+        val (osDir, ext) = when {
+            osName.contains("mac") -> "macos" to "dylib"
+            osName.contains("linux") -> "linux" to "so"
+            else -> throw UnsupportedOperationException("Unsupported OS: $osName")
+        }
+
+        val resourcePath = "/native/$osDir/libfrida_wrapper.$ext"
+        val stream = NativeLoader::class.java.getResourceAsStream(resourcePath)
+            ?: throw IllegalStateException("Native library not found at $resourcePath")
+
+        val tempFile = Files.createTempFile("frida_wrapper", ".$ext").toFile()
+        tempFile.deleteOnExit()
+        stream.use { it.copyTo(tempFile.outputStream()) }
+        System.load(tempFile.absolutePath)
     }
 }

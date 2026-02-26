@@ -1,21 +1,34 @@
 package dev.supersam.app
 
-import NativeLoader
+import dev.supersam.frida.DeviceType
 import dev.supersam.frida.Frida
-import dev.supersam.fridaSource.FridaDeviceType
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
-fun main() {
-    NativeLoader.load()
+fun main() = runBlocking {
+    val devices = Frida.enumerateDevices()
+    println("Found ${devices.size} device(s):")
 
-    Frida.enumerateDevices().forEach {
-        println("Device: ${it.name} (${it.id})")
-        if (it.type == FridaDeviceType.FRIDA_DEVICE_TYPE_USB)
+    for (device in devices) {
+        println("  Device: ${device.name} (${device.id}) type=${device.type}")
+
+        if (device.type == DeviceType.USB) {
             try {
-                Frida.enumerateApplications(it.id).forEach {
-                    println("$it")
+                val apps = device.enumerateApplications()
+                println("  Applications (${apps.size}):")
+                for (app in apps) {
+                    println("    ${app.name} [${app.identifier}] pid=${app.pid}")
                 }
             } catch (e: Exception) {
-                println("Error: ${e.message}")
+                println("  Error enumerating applications: ${e.message}")
             }
+        }
     }
+
+
+    Frida.deviceAdded.collect   { d -> println("connected: ${d.name}") }
+     Frida.deviceRemoved.collect { d -> println("disconnected: ${d.name}") }
+     Frida.deviceChanged.collect { _ -> println("device list changed") }
+
+    Frida.shutdown()
 }
