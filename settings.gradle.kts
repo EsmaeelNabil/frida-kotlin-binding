@@ -14,5 +14,7 @@ plugins {
 
 rootProject.name = "frida-kotlin-again"
 include("app")
-include("frida")
+include("frida-jvm")
+include("frida-api")
+include("frida-ios")
 include("frida-gadget")

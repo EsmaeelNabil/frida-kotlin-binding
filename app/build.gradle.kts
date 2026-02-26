@@ -21,11 +21,11 @@ application {
 
 dependencies {
     implementation(libs.guava)
-    implementation(projects.frida)
+    implementation(projects.fridaJvm)
     implementation(libs.kotlinx.coroutines.core)
 }
 
 tasks.named<JavaExec>("run") {
-    systemProperty("java.library.path", "${project(":frida").projectDir}/src/main/cpp/build")
-    dependsOn(":frida:copyNativeLib")
+    systemProperty("java.library.path", "${project(":frida-jvm").projectDir}/src/main/cpp/build")
+    dependsOn(":frida-jvm:copyNativeLib")
 }

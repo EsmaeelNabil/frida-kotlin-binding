@@ -1,0 +1,5 @@
+package = frida_core
+headers = frida_core.h
+staticLibraries = libfrida-core.a
+libraryPaths = src/native
+linkerOpts = -framework Foundation -framework Security -lresolv
