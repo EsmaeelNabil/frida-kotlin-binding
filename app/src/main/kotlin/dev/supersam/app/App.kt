@@ -1,8 +1,6 @@
 package dev.supersam.app
 
-import dev.supersam.frida.DeviceType
 import dev.supersam.frida.Frida
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 fun main() = runBlocking {
@@ -12,7 +10,7 @@ fun main() = runBlocking {
     for (device in devices) {
         println("  Device: ${device.name} (${device.id}) type=${device.type}")
 
-        if (device.type == DeviceType.USB) {
+
             try {
                 val apps = device.enumerateApplications()
                 println("  Applications (${apps.size}):")
@@ -22,13 +20,9 @@ fun main() = runBlocking {
             } catch (e: Exception) {
                 println("  Error enumerating applications: ${e.message}")
             }
-        }
+
     }
 
-
-    Frida.deviceAdded.collect   { d -> println("connected: ${d.name}") }
-     Frida.deviceRemoved.collect { d -> println("disconnected: ${d.name}") }
-     Frida.deviceChanged.collect { _ -> println("device list changed") }
 
     Frida.shutdown()
 }

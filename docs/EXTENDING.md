@@ -230,6 +230,7 @@ All signals below are fully implemented and usable today:
 | `session.detached` | `"detached"` | `FridaSession` | `DetachReason` | Primitive — no `g_object_ref` needed |
 | `script.messages` | `"message"` | `FridaScript` | `String` (raw JSON) | Primitive — no `g_object_ref` needed |
 | `script.typedMessages` | _(Kotlin `.map`)_ | — | `ScriptMessage` | No C++ — pure Kotlin transform |
+| `script.destroyed` | `"destroyed"` | `FridaScript` | `Unit` | No arg — `onDestroyed()V` method |
 | `device.childAdded` | `"child-added"` | `FridaDevice` | `FridaChild` | Requires `enableSpawnGating()` first |
 | `device.childRemoved` | `"child-removed"` | `FridaDevice` | `FridaChild` | Requires `enableSpawnGating()` first |
 | `Frida.deviceAdded` | `"added"` | `FridaDeviceManager` | `FridaDevice` | — |
@@ -239,6 +240,12 @@ All signals below are fully implemented and usable today:
 ---
 
 ## Implemented API patterns with examples
+
+### Frida version
+
+```kotlin
+println("Frida ${Frida.version}")   // e.g. "Frida 17.7.3"
+```
 
 ### Script message typing
 
@@ -255,7 +262,114 @@ script.typedMessages.collect { msg ->
 }
 ```
 
-To add a new `ScriptMessage` variant in a future session: add the data class to `FridaModels.kt` and a `when` branch to `FridaMessageParser.parse()`. Zero C++ changes.
+To add a new `ScriptMessage` variant: add the data class to `FridaModels.kt` and a `when` branch to `FridaMessageParser.parse()`. Zero C++ changes.
+
+### Script destroyed signal
+
+```kotlin
+launch {
+    script.destroyed.collect {
+        println("Script was destroyed — re-inject if needed")
+    }
+}
+script.load()
+```
+
+The flow closes after emitting once (identical to `session.detached`).
+
+### Script snapshots
+
+Pre-initialize expensive state (Java bridge, large modules) once and reuse it across many scripts:
+
+```kotlin
+// 1. Create snapshot — runs embedScript in an isolated V8 context
+val snapshot = session.snapshotScript(
+    embedScript   = "const bridge = Java.api;",   // state to preserve
+    warmupScript  = "bridge.use('java.lang.Object');"  // optional JIT warm-up
+)
+
+// 2. Create scripts that start from the pre-initialized heap
+val script = session.createScriptFromSnapshot(
+    snapshot = snapshot,
+    source   = "Java.perform(() => { console.log('fast start!'); });"
+)
+script.load()
+```
+
+Snapshots require V8 runtime (not QuickJS). `frida_session_snapshot_script_sync` enforces this.
+
+### Remote device pairing
+
+```kotlin
+// Connect to a remote Frida server (default port 27042)
+val remote = Frida.addRemoteDevice("192.168.1.50")
+println("Connected: ${remote.name}")
+
+val apps = remote.enumerateApplications()
+
+// Disconnect when done
+Frida.removeRemoteDevice("192.168.1.50")
+```
+
+Supports custom ports: `"192.168.1.50:27099"`.
+
+### Session reconnect on device lost
+
+```kotlin
+device.attachWithReconnect(
+    pid          = targetPid,
+    maxRetries   = 5,
+    retryDelayMs = 3_000,
+    onReconnect  = { attempt -> println("Reconnect attempt $attempt") }
+) { session ->
+    val script = session.createScript(source)
+    launch { script.typedMessages.collect { println(it) } }
+    script.load()
+    awaitCancellation()   // stay alive until device lost kicks in
+}
+```
+
+`attachWithReconnect` retries on `DEVICE_LOST` and `CONNECTION_TERMINATED`. All child coroutines (message collectors, etc.) are cancelled automatically before each retry. On `APPLICATION_REQUESTED` or `PROCESS_TERMINATED` the exception propagates normally.
+
+### Interceptor helpers
+
+```kotlin
+// Attach a hook — returns the live FridaScript
+val hook = session.interceptor.attach(
+    address  = "0x10001234",
+    onEnter  = "send({ fn: 'open', path: args[0].readUtf8String() });",
+    onLeave  = "send({ fn: 'open', ret: retval.toInt32() });"
+)
+
+// Receive hook messages
+launch { hook.typedMessages.collect { println(it) } }
+
+// Later — revert instrumentation and clean up
+session.interceptor.flush()
+session.interceptor.revert("0x10001234")
+hook.unload()
+```
+
+### Stalker helpers
+
+```kotlin
+// Follow a thread and record call events
+val trace = session.stalker.follow(
+    threadId  = 1234L,
+    events    = setOf(StalkerEvent.CALL, StalkerEvent.RET),
+    onReceive = """
+        var events = Stalker.parse(events, { stringify: true });
+        send(JSON.stringify(events));
+    """
+)
+
+launch { trace.typedMessages.collect { println(it) } }
+
+// Later
+session.stalker.unfollow(1234L)
+session.stalker.garbageCollect()
+trace.unload()
+```
 
 ### Spawn gating — the full workflow
 
@@ -295,23 +409,21 @@ device.disableSpawnGating()
 
 ```kotlin
 // React to USB device plug/unplug without polling
-val monitorJob = launch {
+launch {
     Frida.deviceAdded.collect { device ->
-        println("Device connected: ${device.name} (${device.type})")
+        println("Connected: ${device.name} (${device.type})")
     }
 }
-
 launch {
     Frida.deviceRemoved.collect { device ->
-        println("Device disconnected: ${device.name}")
+        println("Disconnected: ${device.name}")
     }
 }
-
-// Or just get notified something changed and re-enumerate
+// Or just re-enumerate whenever anything changes
 launch {
     Frida.deviceChanged.collect {
         val devices = Frida.enumerateDevices()
-        println("Device list updated: ${devices.map { it.name }}")
+        println("Device list: ${devices.map { it.name }}")
     }
 }
 ```
@@ -322,11 +434,9 @@ launch {
 
 | GObject signal | On | Use case |
 |---------------|----|----------|
-| `"destroyed"` | `FridaScript` | Script crashed or was forcibly unloaded |
-| `"output"` | `FridaProcess` (via session) | stdout/stderr from spawned process |
-| `"output"` | `FridaDevice` | Device-level process output |
+| `"output"` | `FridaDevice` | stdout/stderr from spawned process |
 
-These follow the identical struct + `callbackFlow` pattern — they just haven't been wired up yet.
+This follows the identical `DestroyedData`-style struct + `callbackFlow` pattern.
 
 ---
 
@@ -348,40 +458,7 @@ Returns a `GHashTable*` of string → GVariant. Two implementation strategies:
 
 **Option B** — expose as `Map<String, String>` by iterating in C++ and building a Java `HashMap` via JNI (`FindClass("java/util/HashMap")`, `NewObject`, `CallObjectMethod` with `put`).
 
-Option A is simpler to implement. Option B gives a cleaner Kotlin API.
-
-### Remote device pairing
-
-```bash
-grep "frida_device_manager_add_remote_device" frida/src/main/cpp/frida_core.h
-```
-
-Takes a host string and optional `FridaRemoteDeviceOptions*`. Wraps as:
-```kotlin
-// In Frida.kt
-suspend fun addRemoteDevice(address: String): FridaDevice = withContext(Dispatchers.IO) {
-    FridaDevice(FridaNative.deviceManagerAddRemoteDevice(deviceManagerHandle, address))
-}
-```
-
-JNI: create options with `frida_remote_device_options_new()`, pass `nullptr` for default options, call `frida_device_manager_add_remote_device_sync`.
-
-### Interceptor / Stalker helpers
-
-Pure Kotlin — no new C++ or JNI. Write helpers that generate the JavaScript source string:
-
-```kotlin
-object FridaInterceptor {
-    fun onEnter(address: String, handler: String): String = """
-        Interceptor.attach(ptr("$address"), {
-            onEnter(args) { $handler }
-        });
-    """.trimIndent()
-}
-
-val script = session.createScript(FridaInterceptor.onEnter("0x1234", "console.log('hit')"))
-script.load()
-```
+Option A is simpler. Option B gives a cleaner Kotlin API.
 
 ### Live Stalker events via typedMessages
 
@@ -394,30 +471,6 @@ data class Stalker(val events: List<StalkerEvent>) : ScriptMessage()
 ```
 
 No C++ changes — everything flows through the existing `"message"` signal.
-
-### Session reconnect on device lost
-
-```kotlin
-// In Frida.kt
-suspend fun getDeviceWithRetry(id: String, retries: Int = 3): FridaDevice {
-    repeat(retries) { attempt ->
-        try { return getDevice(id) }
-        catch (e: Exception) { delay(1_000L * (attempt + 1)) }
-    }
-    return getDevice(id)
-}
-```
-
-Pair with `session.detached.collect` to know when to reconnect:
-```kotlin
-session.detached.collect { reason ->
-    if (reason == DetachReason.DEVICE_LOST) {
-        val newDevice  = Frida.getDeviceWithRetry(deviceId)
-        val newSession = newDevice.attach(pid)
-        // re-inject script ...
-    }
-}
-```
 
 ---
 

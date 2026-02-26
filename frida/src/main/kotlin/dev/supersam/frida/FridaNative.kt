@@ -30,14 +30,24 @@ internal object FridaNative {
         fun onChange()
     }
 
+    /** Used for the script "destroyed" notification. */
+    fun interface DestroyedCallback {
+        fun onDestroyed()
+    }
+
     // Init
     @JvmStatic external fun fridaInit()
     @JvmStatic external fun fridaShutdown()
+    @JvmStatic external fun fridaVersionString(): String
 
     // DeviceManager — enumeration
     @JvmStatic external fun deviceManagerNew(): Long
     @JvmStatic external fun deviceManagerEnumerateDevices(handle: Long): LongArray
     @JvmStatic external fun deviceManagerGetDeviceById(handle: Long, id: String, timeout: Int): Long
+
+    // DeviceManager — remote pairing
+    @JvmStatic external fun deviceManagerAddRemoteDevice(handle: Long, address: String): Long
+    @JvmStatic external fun deviceManagerRemoveRemoteDevice(handle: Long, address: String)
 
     // DeviceManager — signals
     @JvmStatic external fun deviceManagerConnectAdded(handle: Long, cb: DeviceCallback): Long
@@ -100,6 +110,12 @@ internal object FridaNative {
     @JvmStatic external fun scriptPost(handle: Long, message: String)
     @JvmStatic external fun scriptConnectMessage(handle: Long, callback: MessageCallback): Long
     @JvmStatic external fun scriptDisconnectMessage(handle: Long, cbHandle: Long)
+    @JvmStatic external fun scriptConnectDestroyed(handle: Long, callback: DestroyedCallback): Long
+    @JvmStatic external fun scriptDisconnectDestroyed(handle: Long, cbHandle: Long)
+
+    // Session — snapshots
+    @JvmStatic external fun sessionSnapshotScript(handle: Long, embedScript: String, warmupScript: String): ByteArray
+    @JvmStatic external fun sessionCreateScriptFromSnapshot(handle: Long, source: String, snapshot: ByteArray): Long
 
     // Memory management
     @JvmStatic external fun unref(handle: Long)

@@ -115,6 +115,7 @@ class App : Application() {
 
 - [x] Enumerate devices
 - [x] Get device by ID
+- [x] Frida version string (`Frida.version`)
 - [x] Enumerate applications (with scope: MINIMAL / METADATA / FULL)
 - [x] Enumerate processes (with scope)
 - [x] Attach to process by PID
@@ -126,19 +127,22 @@ class App : Application() {
 - [x] Send messages to a script (`script.post`)
 - [x] Receive messages from a script (`script.messages: Flow<String>`)
 - [x] Session detached signal (`session.detached: Flow<DetachReason>`)
+- [x] Script destroyed signal (`script.destroyed: Flow<Unit>`)
 - [x] Script message parsing (`script.typedMessages: Flow<ScriptMessage>`)
+- [x] Script snapshots — `session.snapshotScript()` / `session.createScriptFromSnapshot()`
 - [x] Spawn gating — `enableSpawnGating()` + `childAdded / childRemoved: Flow<FridaChild>`
 - [x] Device manager signals — `Frida.deviceAdded / deviceRemoved / deviceChanged: Flow<…>`
+- [x] Remote device pairing — `Frida.addRemoteDevice(address)` / `removeRemoteDevice(address)`
+- [x] Session reconnect — `device.attachWithReconnect(pid) { session -> … }`
+- [x] Interceptor helpers — `session.interceptor.attach(address, onEnter, onLeave)`
+- [x] Stalker helpers — `session.stalker.follow(threadId, events, onReceive)`
 - [x] Android gadget AAR
 
 ## Roadmap
 
-- [ ] Interceptor / Stalker helpers (convenience wrappers around script injection)
-- [ ] Session persist / reconnect on `DEVICE_LOST`
-- [ ] Script snapshots
-- [ ] Remote device pairing (`frida_device_manager_add_remote_device_sync`)
 - [ ] iOS support (macOS controller already works; devkit is the same)
-- [ ] Frida version exposed as a constant
+- [ ] Device system parameters (`frida_device_query_system_parameters_sync`)
+- [ ] Process output signal (`"output"` on `FridaDevice`)
 
 ## Project structure
 
@@ -158,6 +162,8 @@ frida-kotlin-binding/
 │       ├── FridaDevice.kt
 │       ├── FridaSession.kt
 │       ├── FridaScript.kt
+│       ├── FridaInterceptor.kt    ← Interceptor + Stalker helpers
+│       ├── FridaReconnect.kt      ← attachWithReconnect extension
 │       └── NativeLoader.kt
 ├── frida-gadget/
 │   ├── download_gadget.sh

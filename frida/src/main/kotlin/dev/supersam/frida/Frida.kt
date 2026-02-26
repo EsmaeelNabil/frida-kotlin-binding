@@ -14,6 +14,9 @@ object Frida {
         FridaNative.deviceManagerNew()
     }
 
+    /** Frida core version string, e.g. `"17.7.3"`. */
+    val version: String get() = FridaNative.fridaVersionString()
+
     // ---- enumeration ----
 
     suspend fun enumerateDevices(): List<FridaDevice> = withContext(Dispatchers.IO) {
@@ -23,6 +26,24 @@ object Frida {
 
     suspend fun getDevice(id: String, timeout: Int = 0): FridaDevice = withContext(Dispatchers.IO) {
         FridaDevice(FridaNative.deviceManagerGetDeviceById(deviceManagerHandle, id, timeout))
+    }
+
+    // ---- remote device pairing ----
+
+    /**
+     * Connects to a remote Frida server at [address] (e.g. `"192.168.1.10"` or
+     * `"192.168.1.10:27042"`). Returns the [FridaDevice] for the remote host.
+     */
+    suspend fun addRemoteDevice(address: String): FridaDevice = withContext(Dispatchers.IO) {
+        FridaDevice(FridaNative.deviceManagerAddRemoteDevice(deviceManagerHandle, address))
+    }
+
+    /**
+     * Disconnects from the remote Frida server at [address]. The device previously
+     * returned by [addRemoteDevice] becomes invalid after this call.
+     */
+    suspend fun removeRemoteDevice(address: String) = withContext(Dispatchers.IO) {
+        FridaNative.deviceManagerRemoveRemoteDevice(deviceManagerHandle, address)
     }
 
     // ---- device list signals ----

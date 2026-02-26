@@ -31,6 +31,22 @@ class FridaScript(val handle: Long) {
      */
     val typedMessages: Flow<ScriptMessage> = messages.map { FridaMessageParser.parse(it) }
 
+    /**
+     * Emits [Unit] once when the script is destroyed (e.g. due to an uncaught exception
+     * that crashed the runtime, or when the session is detached), then closes.
+     * Backed by the Frida "destroyed" GObject signal.
+     */
+    val destroyed: Flow<Unit> = callbackFlow {
+        val callback = FridaNative.DestroyedCallback {
+            trySend(Unit)
+            close()
+        }
+        val cbHandle = FridaNative.scriptConnectDestroyed(handle, callback)
+        awaitClose {
+            FridaNative.scriptDisconnectDestroyed(handle, cbHandle)
+        }
+    }
+
     suspend fun load() = withContext(Dispatchers.IO) {
         FridaNative.scriptLoad(handle)
     }

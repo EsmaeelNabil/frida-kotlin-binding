@@ -663,4 +663,141 @@ Java_dev_supersam_frida_FridaNative_deviceManagerDisconnectChanged(
     }
 }
 
+// ============================================================
+// Version
+// ============================================================
+
+JNIEXPORT jstring JNICALL
+Java_dev_supersam_frida_FridaNative_fridaVersionString(JNIEnv* env, jclass cls) {
+    return env->NewStringUTF(frida_version_string());
+}
+
+// ============================================================
+// DeviceManager — remote device pairing
+// ============================================================
+
+JNIEXPORT jlong JNICALL
+Java_dev_supersam_frida_FridaNative_deviceManagerAddRemoteDevice(
+        JNIEnv* env, jclass cls, jlong handle, jstring jaddress) {
+    FridaDeviceManager* manager = (FridaDeviceManager*)(intptr_t)handle;
+    const char* address = env->GetStringUTFChars(jaddress, nullptr);
+    GError* error = nullptr;
+    FridaDevice* device = frida_device_manager_add_remote_device_sync(
+            manager, address, nullptr, nullptr, &error);
+    env->ReleaseStringUTFChars(jaddress, address);
+    if (error) { throw_from_gerror(env, error); return 0; }
+    return (jlong)(intptr_t)device;
+}
+
+JNIEXPORT void JNICALL
+Java_dev_supersam_frida_FridaNative_deviceManagerRemoveRemoteDevice(
+        JNIEnv* env, jclass cls, jlong handle, jstring jaddress) {
+    FridaDeviceManager* manager = (FridaDeviceManager*)(intptr_t)handle;
+    const char* address = env->GetStringUTFChars(jaddress, nullptr);
+    GError* error = nullptr;
+    frida_device_manager_remove_remote_device_sync(manager, address, nullptr, &error);
+    env->ReleaseStringUTFChars(jaddress, address);
+    if (error) throw_from_gerror(env, error);
+}
+
+// ============================================================
+// Script — destroyed signal
+// ============================================================
+
+struct DestroyedData {
+    JavaVM*   jvm;
+    jobject   callback;   // global ref, method: onDestroyed()V
+    jmethodID methodId;
+    gulong    handlerId;
+};
+
+static void on_script_destroyed(FridaScript* script, gpointer user_data) {
+    DestroyedData* data = static_cast<DestroyedData*>(user_data);
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (data->jvm->GetEnv((void**)&env, JNI_VERSION_1_8) == JNI_EDETACHED) {
+        data->jvm->AttachCurrentThread((void**)&env, nullptr);
+        attached = true;
+    }
+    if (env) {
+        env->CallVoidMethod(data->callback, data->methodId);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+    }
+    if (attached) data->jvm->DetachCurrentThread();
+}
+
+JNIEXPORT jlong JNICALL
+Java_dev_supersam_frida_FridaNative_scriptConnectDestroyed(
+        JNIEnv* env, jclass cls, jlong handle, jobject callback) {
+    FridaScript* script = (FridaScript*)(intptr_t)handle;
+    DestroyedData* data = new DestroyedData();
+    env->GetJavaVM(&data->jvm);
+    data->callback = env->NewGlobalRef(callback);
+    data->methodId = env->GetMethodID(env->GetObjectClass(callback), "onDestroyed", "()V");
+    data->handlerId = g_signal_connect(script, "destroyed",
+                                        G_CALLBACK(on_script_destroyed), data);
+    return (jlong)(intptr_t)data;
+}
+
+JNIEXPORT void JNICALL
+Java_dev_supersam_frida_FridaNative_scriptDisconnectDestroyed(
+        JNIEnv* env, jclass cls, jlong handle, jlong cbHandle) {
+    FridaScript* script = (FridaScript*)(intptr_t)handle;
+    DestroyedData* data = (DestroyedData*)(intptr_t)cbHandle;
+    if (data) {
+        g_signal_handler_disconnect(script, data->handlerId);
+        env->DeleteGlobalRef(data->callback);
+        delete data;
+    }
+}
+
+// ============================================================
+// Session — script snapshots
+// ============================================================
+
+JNIEXPORT jbyteArray JNICALL
+Java_dev_supersam_frida_FridaNative_sessionSnapshotScript(
+        JNIEnv* env, jclass cls, jlong handle, jstring jembedScript, jstring jwarmupScript) {
+    FridaSession* session = (FridaSession*)(intptr_t)handle;
+    const char* embedScript = env->GetStringUTFChars(jembedScript, nullptr);
+    FridaSnapshotOptions* opts = frida_snapshot_options_new();
+    if (jwarmupScript) {
+        const char* warmup = env->GetStringUTFChars(jwarmupScript, nullptr);
+        if (*warmup != '\0') frida_snapshot_options_set_warmup_script(opts, warmup);
+        env->ReleaseStringUTFChars(jwarmupScript, warmup);
+    }
+    GError* error = nullptr;
+    GBytes* bytes = frida_session_snapshot_script_sync(session, embedScript, opts, nullptr, &error);
+    env->ReleaseStringUTFChars(jembedScript, embedScript);
+    frida_unref(opts);
+    if (error) { throw_from_gerror(env, error); return nullptr; }
+    gsize size;
+    const guint8* raw = (const guint8*)g_bytes_get_data(bytes, &size);
+    jbyteArray result = env->NewByteArray((jsize)size);
+    env->SetByteArrayRegion(result, 0, (jsize)size, (const jbyte*)raw);
+    g_bytes_unref(bytes);
+    return result;
+}
+
+JNIEXPORT jlong JNICALL
+Java_dev_supersam_frida_FridaNative_sessionCreateScriptFromSnapshot(
+        JNIEnv* env, jclass cls, jlong handle, jstring jsource, jbyteArray jsnapshot) {
+    FridaSession* session = (FridaSession*)(intptr_t)handle;
+    const char* source = env->GetStringUTFChars(jsource, nullptr);
+    jsize len = env->GetArrayLength(jsnapshot);
+    jbyte* buf = env->GetByteArrayElements(jsnapshot, nullptr);
+    GBytes* snapshot = g_bytes_new(buf, (gsize)len);
+    env->ReleaseByteArrayElements(jsnapshot, buf, JNI_ABORT);
+    FridaScriptOptions* opts = frida_script_options_new();
+    frida_script_options_set_snapshot(opts, snapshot);
+    g_bytes_unref(snapshot);
+    GError* error = nullptr;
+    FridaScript* script = frida_session_create_script_sync(
+            session, source, opts, nullptr, &error);
+    env->ReleaseStringUTFChars(jsource, source);
+    frida_unref(opts);
+    if (error) { throw_from_gerror(env, error); return 0; }
+    return (jlong)(intptr_t)script;
+}
+
 } // extern "C"

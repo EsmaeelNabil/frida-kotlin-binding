@@ -16,16 +16,23 @@
 │  Kotlin API layer   (frida/src/main/kotlin/)            │
 │                                                         │
 │  Frida.kt            top-level object, device manager   │
+│                      version: String                    │
+│                      addRemoteDevice / removeRemoteDevice│
 │                      deviceAdded / deviceRemoved /      │
 │                      deviceChanged: Flow                 │
 │  FridaDevice.kt      attach / spawn / enumerate         │
 │                      enableSpawnGating                  │
 │                      childAdded / childRemoved: Flow     │
 │  FridaSession.kt     createScript / detach              │
+│                      snapshotScript / createScriptFromSnapshot│
 │                      detached: Flow<DetachReason>        │
 │  FridaScript.kt      load / unload / post               │
 │                      messages: Flow<String>             │
 │                      typedMessages: Flow<ScriptMessage> │
+│                      destroyed: Flow<Unit>              │
+│  FridaInterceptor.kt Interceptor + Stalker wrappers     │
+│                      (extension props on FridaSession)  │
+│  FridaReconnect.kt   attachWithReconnect extension      │
 │  FridaMessageParser  JSON → ScriptMessage (no deps)     │
 │  FridaModels.kt      data classes and enums             │
 │  NativeLoader.kt     loads libfrida_wrapper at startup  │
@@ -42,6 +49,7 @@
 │    ChildCallback      onChild(Long)                     │
 │    DeviceCallback     onDevice(Long)                    │
 │    ChangedCallback    onChange()                        │
+│    DestroyedCallback  onDestroyed()                     │
 └──────────────────────┬──────────────────────────────────┘
                        │ JNI
 ┌──────────────────────▼──────────────────────────────────┐
@@ -49,7 +57,8 @@
 │                                                         │
 │  Hand-written JNI functions, one per FridaNative method │
 │  Signal structs: DetachedData, MessageData,             │
-│    ChildSignalData, DeviceSignalData, ChangedData       │
+│    ChildSignalData, DeviceSignalData, ChangedData,      │
+│    DestroyedData                                        │
 │  JNI_OnLoad stores JavaVM* for cross-thread callbacks   │
 └──────────────────────┬──────────────────────────────────┘
                        │ C API
@@ -213,11 +222,76 @@ Frida's internal GLib main loop starts when `frida_init()` is called and runs in
 | `session.detached` | `"detached"` | `FridaSession` | `DetachReason` |
 | `script.messages` | `"message"` | `FridaScript` | raw JSON `String` |
 | `script.typedMessages` | _(Kotlin map of messages)_ | — | `ScriptMessage` |
+| `script.destroyed` | `"destroyed"` | `FridaScript` | `Unit` |
 | `device.childAdded` | `"child-added"` | `FridaDevice` | `FridaChild` |
 | `device.childRemoved` | `"child-removed"` | `FridaDevice` | `FridaChild` |
 | `Frida.deviceAdded` | `"added"` | `FridaDeviceManager` | `FridaDevice` |
 | `Frida.deviceRemoved` | `"removed"` | `FridaDeviceManager` | `FridaDevice` |
 | `Frida.deviceChanged` | `"changed"` | `FridaDeviceManager` | `Unit` |
+
+---
+
+## Script snapshots
+
+Frida supports V8 heap snapshots to reduce cold-start overhead for scripts that load large libraries or require expensive initialization. The workflow is:
+
+1. **Snapshot creation** — `session.snapshotScript(embedScript, warmupScript?)` calls `frida_session_snapshot_script_sync`, which runs `embedScript` in an isolated V8 context, optionally runs `warmupScript` to warm the JIT, and returns the heap as a `ByteArray` wrapped in `ScriptSnapshot`.
+
+2. **Snapshot consumption** — `session.createScriptFromSnapshot(snapshot, source)` calls `frida_session_create_script_sync` with `FridaScriptOptions::set_snapshot`. The resulting `FridaScript` starts from the pre-initialized heap state rather than an empty context.
+
+No new GObject signals are involved — the snapshot bytes cross JNI as `jbyteArray` ↔ `ByteArray`.
+
+```
+session.snapshotScript("require('frida-java-bridge');")
+        │  frida_session_snapshot_script_sync
+        │  → GBytes* → jbyteArray → ByteArray
+        ▼
+ScriptSnapshot(bytes)
+
+session.createScriptFromSnapshot(snapshot, "Java.perform(() => { ... });")
+        │  frida_session_create_script_sync with opts.snapshot = GBytes
+        ▼
+FridaScript — starts with Java bridge pre-loaded
+```
+
+---
+
+## Session reconnect — `attachWithReconnect`
+
+`attachWithReconnect` is a pure Kotlin extension on `FridaDevice` in `FridaReconnect.kt`. No JNI changes were required. The design:
+
+```
+attachWithReconnect(pid) { session ->
+    [block runs in coroutineScope]
+        ┌─ launch { session.detached.first() }   ← watcher
+        │       DEVICE_LOST / CONNECTION_TERMINATED?
+        │           set shouldRetry = true
+        │           outerScope.cancel()  ← cancels block + watcher
+        └─ block(session)                 ← user code
+}
+    CancellationException caught; shouldRetry == true → delay → re-attach
+```
+
+The watcher and the block run as siblings inside the same `coroutineScope`. When the watcher cancels the scope, any child coroutines launched by the block (message collectors, etc.) are torn down automatically before the retry.
+
+---
+
+## Interceptor and Stalker helpers
+
+`FridaInterceptor.kt` provides `Interceptor` and `Stalker` as pure Kotlin classes that inject JavaScript snippets via `session.createScript()`. No new C++ or JNI is involved — these sit entirely on top of the existing `FridaSession.createScript` + `FridaScript.load` path.
+
+```
+session.interceptor.attach("0x10001234", onEnter = "send(args[0]);")
+    → session.createScript("""
+          Interceptor.attach(ptr('0x10001234'), {
+            onEnter: function(args) { send(args[0]); },
+          });
+      """)
+    → script.load()
+    → returns FridaScript (keep to collect typedMessages / unload)
+```
+
+`session.interceptor` and `session.stalker` are extension properties that create new `Interceptor`/`Stalker` instances bound to the session. Since they hold no state themselves, creating them per-call is fine.
 
 ---
 

@@ -59,6 +59,14 @@ enum class ChildOrigin(val value: Int) {
 }
 
 /**
+ * An opaque V8 heap snapshot produced by [FridaSession.snapshotScript].
+ * Pass it to [FridaSession.createScriptFromSnapshot] to create a script with
+ * pre-initialized state, which starts significantly faster than a cold script.
+ */
+@JvmInline
+value class ScriptSnapshot(val bytes: ByteArray)
+
+/**
  * Typed representation of a Frida script message.
  *
  * Frida scripts communicate via three message types:
