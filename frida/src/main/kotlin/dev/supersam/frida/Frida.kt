@@ -18,22 +18,21 @@ class Frida {
             val manager = frida.frida_device_manager_new()
             val device = frida.frida_device_manager_get_device_by_id_sync(manager, appId, 0)
 
-            val type = frida.frida_device_get_dtype(device)
-                val option = frida.frida_application_query_options_new()
-                frida.frida_application_query_options_set_scope(option, FridaScope.FRIDA_SCOPE_FULL)
-                val apps = frida.frida_device_enumerate_applications_sync(device, option)
-                val appsSize = frida.frida_application_list_size(apps)
-                for (i in 0 until appsSize) {
-                    val app = frida.frida_application_list_get(apps, i)
+            val option = frida.frida_application_query_options_new()
+            frida.frida_application_query_options_set_scope(option, FridaScope.FRIDA_SCOPE_FULL)
+            val apps = frida.frida_device_enumerate_applications_sync(device, option)
+            val appsSize = frida.frida_application_list_size(apps)
+            for (i in 0 until appsSize) {
+                val app = frida.frida_application_list_get(apps, i)
 
-                    appsIdentifiers.add(
-                        Application(
-                            name = frida.frida_application_get_name(app),
-                            identifier = frida.frida_application_get_identifier(app),
-                            pid = frida.frida_application_get_pid(app)
-                        )
+                appsIdentifiers.add(
+                    Application(
+                        name = frida.frida_application_get_name(app),
+                        identifier = frida.frida_application_get_identifier(app),
+                        pid = frida.frida_application_get_pid(app)
                     )
-                }
+                )
+            }
 
             return appsIdentifiers
         }
