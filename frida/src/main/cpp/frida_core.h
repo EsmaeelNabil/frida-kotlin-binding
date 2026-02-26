@@ -249,6 +249,7 @@
 #define g_macro__has_attribute___const__ G_GNUC_CHECK_VERSION (2, 4)
 #define g_macro__has_attribute___unused__ G_GNUC_CHECK_VERSION (2, 4)
 #define g_macro__has_attribute___no_instrument_function__ G_GNUC_CHECK_VERSION (2, 4)
+#define g_macro__has_attribute_weak G_GNUC_CHECK_VERSION (2, 7)
 #define g_macro__has_attribute_fallthrough G_GNUC_CHECK_VERSION (6, 0)
 #define g_macro__has_attribute___deprecated__ G_GNUC_CHECK_VERSION (3, 1)
 #define g_macro__has_attribute_may_alias G_GNUC_CHECK_VERSION (3, 3)
@@ -713,6 +714,12 @@
   __attribute__ ((__no_instrument_function__))
 #else
 #define G_GNUC_NO_INSTRUMENT
+#endif
+
+#if g_macro__has_attribute(weak)
+#define G_GNUC_WEAK __attribute__((weak))
+#else
+#define G_GNUC_WEAK
 #endif
 
 /**
@@ -5576,6 +5583,7 @@ typedef void (*GThreadGarbageHandler) (gpointer data);
 
 typedef struct _GThreadCallbacks GThreadCallbacks;
 typedef struct _GThread         GThread;
+typedef struct _GSystemThread   GSystemThread;
 
 typedef union  _GMutex          GMutex;
 typedef struct _GRecMutex       GRecMutex;
@@ -5714,6 +5722,20 @@ GLIB_AVAILABLE_IN_ALL
 gpointer        g_thread_join                   (GThread        *thread);
 GLIB_AVAILABLE_IN_ALL
 void            g_thread_yield                  (void);
+
+GLIB_AVAILABLE_IN_2_68
+GSystemThread * _g_system_thread_create         (gulong          stack_size,
+                                                 const char     *name,
+                                                 GThreadFunc     func,
+                                                 gpointer        data);
+GLIB_AVAILABLE_IN_2_68
+void            _g_system_thread_detach         (GSystemThread  *thread);
+GLIB_AVAILABLE_IN_2_68
+void            _g_system_thread_wait           (GSystemThread  *thread);
+GLIB_AVAILABLE_IN_2_68
+void            _g_system_thread_exit           (void);
+GLIB_AVAILABLE_IN_2_68
+void            _g_system_thread_set_name       (const gchar    *name);
 
 
 GLIB_AVAILABLE_IN_2_32
@@ -9999,6 +10021,9 @@ struct _GPollFD
 #ifdef G_POLLFD_KQUEUE
   gpointer      handle;
 #endif
+#ifdef G_OS_NONE
+  gpointer      user_data;
+#endif
 };
 
 /**
@@ -12465,6 +12490,7 @@ gint        g_io_channel_unix_get_fd (GIOChannel *channel);
 GLIB_VAR GSourceFuncs g_io_watch_funcs;
 
 #define G_KQUEUE_WAKEUP_HANDLE -42
+#define G_WAIT_WAKEUP_HANDLE   -43
 
 #ifdef G_OS_WIN32
 
@@ -14796,6 +14822,17 @@ GPrintFunc      g_set_printerr_handler  (GPrintFunc      func);
   } G_STMT_END
 
 #endif /* !G_DISABLE_CHECKS */
+
+#define G_PANIC_MISSING_IMPLEMENTATION() \
+    g_panic ("Missing implementation for: %s", G_STRFUNC)
+
+typedef void (*GPanicFunc) (const gchar *message, gpointer data);
+GLIB_AVAILABLE_IN_2_68
+void            g_panic              (const gchar * format,
+                                      ...);
+GLIB_AVAILABLE_IN_2_68
+void            g_set_panic_handler  (GPanicFunc    func,
+                                      gpointer      user_data);
 
 G_END_DECLS
 
@@ -19819,6 +19856,45 @@ const gchar * glib_check_version (guint required_major,
 G_END_DECLS
 
 #endif /*  __G_VERSION_H__ */
+/*
+ * Copyright © 2025 Ole André Vadla Ravnås <oleavr@frida.re>
+ *
+ * This library is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 2 of the
+ * licence, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, see <http://www.gnu.org/licenses/>.
+ */
+
+#ifndef __G_WAIT_H__
+#define __G_WAIT_H__
+
+#if !defined (__GLIB_H_INSIDE__) && !defined (GLIB_COMPILATION)
+#error "Only <glib.h> can be included directly."
+#endif
+
+
+#define G_WAIT_INFINITE (-1)
+
+G_BEGIN_DECLS
+
+GLIB_AVAILABLE_IN_2_68
+void            g_wait_sleep            (gpointer token, gint64 timeout_us);
+GLIB_AVAILABLE_IN_2_68
+void            g_wait_wake             (gpointer token);
+GLIB_AVAILABLE_IN_2_68
+gboolean        g_wait_is_set           (gpointer token);
+
+G_END_DECLS
+
+#endif
 
 #ifdef G_PLATFORM_WIN32
 #include <glib/gwin32.h>
@@ -20441,7 +20517,7 @@ void     g_thread_foreach      (GFunc             thread_func,
 #endif
 
 #define g_static_mutex_get_mutex g_static_mutex_get_mutex_impl GLIB_DEPRECATED_MACRO_IN_2_32
-#ifndef G_OS_WIN32
+#if !defined (G_OS_WIN32) && !defined (G_OS_NONE)
 #define G_STATIC_MUTEX_INIT { NULL, PTHREAD_MUTEX_INITIALIZER } GLIB_DEPRECATED_MACRO_IN_2_32_FOR(g_mutex_init)
 #else
 #define G_STATIC_MUTEX_INIT { NULL } GLIB_DEPRECATED_MACRO_IN_2_32_FOR(g_mutex_init)
@@ -23925,8 +24001,6 @@ type_name##_get_type_once (void) \
 #define _G_DEFINE_TYPE_EXTENDED_BEGIN(TypeName, type_name, TYPE_PARENT, flags) \
   _G_DEFINE_TYPE_EXTENDED_BEGIN_PRE(TypeName, type_name, TYPE_PARENT) \
   _G_DEFINE_TYPE_EXTENDED_BEGIN_REGISTER(TypeName, type_name, TYPE_PARENT, flags) \
-
-#define TYPE_PREREQ void
 
 /* Intentionally using (GTypeFlags) 0 instead of G_TYPE_FLAG_NONE here,
  * to avoid deprecation warnings with older GLIB_VERSION_MAX_ALLOWED */
@@ -54025,6 +54099,12 @@ gboolean      g_task_had_error                 (GTask           *task);
 GIO_AVAILABLE_IN_2_44
 gboolean      g_task_get_completed             (GTask           *task);
 
+/*< private >*/
+#ifndef __GTK_DOC_IGNORE__
+/* Debugging API, not part of the public API */
+void g_task_print_alive_tasks (void);
+#endif  /* !__GTK_DOC_IGNORE__ */
+
 G_END_DECLS
 
 #endif /* __G_TASK_H__ */
@@ -56671,8 +56751,10 @@ G_END_DECLS
 /* json-glib.h: Main header
  *
  * This file is part of JSON-GLib
- * Copyright (C) 2007  OpenedHand Ltd.
- * Copyright (C) 2009  Intel Corp.
+ *
+ * SPDX-FileCopyrightText: 2007  OpenedHand Ltd.
+ * SPDX-FileCopyrightText: 2009  Intel Corp.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -56690,17 +56772,17 @@ G_END_DECLS
  * Author:
  *   Emmanuele Bassi  <ebassi@linux.intel.com>
  */
-
-#ifndef __JSON_GLIB_H__
-#define __JSON_GLIB_H__
+#pragma once
 
 #define __JSON_GLIB_INSIDE__
 
 /* json-types.h - JSON data types
  * 
  * This file is part of JSON-GLib
- * Copyright (C) 2007  OpenedHand Ltd.
- * Copyright (C) 2009  Intel Corp.
+ *
+ * SPDX-FileCopyrightText: 2007  OpenedHand Ltd.
+ * SPDX-FileCopyrightText: 2009  Intel Corp.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -56719,8 +56801,7 @@ G_END_DECLS
  *   Emmanuele Bassi  <ebassi@linux.intel.com>
  */
 
-#ifndef __JSON_TYPES_H__
-#define __JSON_TYPES_H__
+#pragma once
 
 #if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
 #error "Only <json-glib/json-glib.h> can be included directly."
@@ -56729,7 +56810,9 @@ G_END_DECLS
 /* json-version-macros.h - JSON-GLib symbol versioning macros
  * 
  * This file is part of JSON-GLib
- * Copyright © 2014  Emmanuele Bassi
+ *
+ * SPDX-FileCopyrightText: 2014  Emmanuele Bassi
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -56745,8 +56828,7 @@ G_END_DECLS
  * License along with this library. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __JSON_VERSION_MACROS_H__
-#define __JSON_VERSION_MACROS_H__
+#pragma once
 
 #if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
 #error "Only <json-glib/json-glib.h> can be included directly."
@@ -56755,8 +56837,10 @@ G_END_DECLS
 /* json-version.h - JSON-GLib versioning information
  * 
  * This file is part of JSON-GLib
- * Copyright (C) 2007  OpenedHand Ltd.
- * Copyright (C) 2009  Intel Corp.
+ *
+ * SPDX-FileCopyrightText: 2007  OpenedHand Ltd.
+ * SPDX-FileCopyrightText: 2009  Intel Corp.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -56775,8 +56859,7 @@ G_END_DECLS
  *   Emmanuele Bassi  <ebassi@linux.intel.com>
  */
 
-#ifndef __JSON_VERSION_H__
-#define __JSON_VERSION_H__
+#pragma once
 
 #if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
 #error "Only <json-glib/json-glib.h> can be included directly."
@@ -56794,21 +56877,21 @@ G_END_DECLS
  *
  * Json minor version component (e.g. 2 if `JSON_VERSION` is "1.2.3")
  */
-#define JSON_MINOR_VERSION              (7)
+#define JSON_MINOR_VERSION              (10)
 
 /**
  * JSON_MICRO_VERSION:
  *
  * Json micro version component (e.g. 3 if `JSON_VERSION` is "1.2.3")
  */
-#define JSON_MICRO_VERSION              (1)
+#define JSON_MICRO_VERSION              (7)
 
 /**
  * JSON_VERSION
  *
  * The version of JSON-GLib.
  */
-#define JSON_VERSION                    (1.7.1)
+#define JSON_VERSION                    (1.10.7)
 
 /**
  * JSON_VERSION_S:
@@ -56816,7 +56899,7 @@ G_END_DECLS
  * The version of JSON-GLib, encoded as a string, useful for printing and
  * concatenation.
  */
-#define JSON_VERSION_S                  "1.7.1"
+#define JSON_VERSION_S                  "1.10.7"
 
 /**
  * JSON_ENCODE_VERSION:
@@ -56854,11 +56937,26 @@ G_END_DECLS
          (JSON_MAJOR_VERSION == (major) && JSON_MINOR_VERSION == (minor) && \
           JSON_MICRO_VERSION >= (micro)))
 
-#endif /* __JSON_VERSION_H__ */
+#define JSON_STATIC_BUILD
 
-#ifndef _JSON_EXTERN
-#define _JSON_EXTERN extern
+#if (defined(_WIN32) || defined(__CYGWIN__)) && !defined(JSON_STATIC_BUILD)
+# define _JSON_EXPORT __declspec(dllexport)
+# define _JSON_IMPORT __declspec(dllimport)
+#elif defined(__GNUC__) && (__GNUC__ >= 4)
+# define _JSON_EXPORT __attribute__((__visibility__("default")))
+# define _JSON_IMPORT
+#else
+# define _JSON_EXPORT
+# define _JSON_IMPORT
 #endif
+
+#ifdef JSON_COMPILATION
+# define _JSON_API _JSON_EXPORT
+#else
+# define _JSON_API _JSON_IMPORT
+#endif
+
+#define _JSON_EXTERN _JSON_API extern
 
 #ifdef JSON_DISABLE_DEPRECATION_WARNINGS
 #define JSON_DEPRECATED _JSON_EXTERN
@@ -56915,6 +57013,15 @@ G_END_DECLS
  * Since: 1.8
  */
 #define JSON_VERSION_1_8        (G_ENCODE_VERSION (1, 8))
+
+/**
+ * JSON_VERSION_1_10:
+ *
+ * The encoded representation of JSON-GLib version "1.10".
+ *
+ * Since: 1.10
+ */
+#define JSON_VERSION_1_10       (G_ENCODE_VERSION (1, 10))
 
 /* evaluates to the current stable version; for development cycles,
  * this means the next stable target
@@ -57067,7 +57174,20 @@ G_END_DECLS
 # define JSON_AVAILABLE_IN_1_8                 _JSON_EXTERN
 #endif
 
-#endif /* __JSON_VERSION_MACROS_H__ */
+/* 1.10 */
+#if JSON_VERSION_MIN_REQUIRED >= JSON_VERSION_1_10
+# define JSON_DEPRECATED_IN_1_10               JSON_DEPRECATED
+# define JSON_DEPRECATED_IN_1_10_FOR(f)        JSON_DEPRECATED_FOR(f)
+#else
+# define JSON_DEPRECATED_IN_1_10               _JSON_EXTERN
+# define JSON_DEPRECATED_IN_1_10_FOR(f)        _JSON_EXTERN
+#endif
+
+#if JSON_VERSION_MAX_ALLOWED < JSON_VERSION_1_10
+# define JSON_AVAILABLE_IN_1_10                JSON_UNAVAILABLE(1, 10)
+#else
+# define JSON_AVAILABLE_IN_1_10                _JSON_EXTERN
+#endif
 
 G_BEGIN_DECLS
 
@@ -57159,7 +57279,7 @@ typedef enum {
  * @object: the iterated JSON object
  * @member_name: the name of the member
  * @member_node: the value of the member
- * @user_data: data passed to the function
+ * @user_data: (closure): data passed to the function
  *
  * The function to be passed to [method@Json.Object.foreach_member].
  *
@@ -57180,7 +57300,7 @@ typedef void (* JsonObjectForeach) (JsonObject  *object,
  * @array: the iterated JSON array
  * @index_: the index of the element
  * @element_node: the value of the element at the given @index_
- * @user_data: data passed to the function
+ * @user_data: (closure): data passed to the function
  *
  * The function to be passed to [method@Json.Array.foreach_element].
  *
@@ -57572,12 +57692,12 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (JsonNode, json_node_unref)
 
 G_END_DECLS
 
-#endif /* __JSON_TYPES_H__ */
-
 /* json-builder.h: JSON tree builder
  *
  * This file is part of JSON-GLib
- * Copyright (C) 2010  Luca Bruno <lethalman88@gmail.com>
+ *
+ * SPDX-FileCopyrightText: 2010  Luca Bruno <lethalman88@gmail.com>
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -57596,8 +57716,7 @@ G_END_DECLS
  *   Luca Bruno  <lethalman88@gmail.com>
  */
 
-#ifndef __JSON_BUILDER_H__
-#define __JSON_BUILDER_H__
+#pragma once
 
 #if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
 #error "Only <json-glib/json-glib.h> can be included directly."
@@ -57682,13 +57801,13 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (JsonBuilder, g_object_unref)
 #endif
 
 G_END_DECLS
-
-#endif /* __JSON_BUILDER_H__ */
 /* json-generator.h - JSON streams generator
  * 
  * This file is part of JSON-GLib
- * Copyright (C) 2007  OpenedHand Ltd.
- * Copyright (C) 2009  Intel Corp.
+ *
+ * SPDX-FileCopyrightText: 2007  OpenedHand Ltd.
+ * SPDX-FileCopyrightText: 2009  Intel Corp.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -57706,9 +57825,7 @@ G_END_DECLS
  * Author:
  *   Emmanuele Bassi  <ebassi@linux.intel.com>
  */
-
-#ifndef __JSON_GENERATOR_H__
-#define __JSON_GENERATOR_H__
+#pragma once
 
 #if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
 #error "Only <json-glib/json-glib.h> can be included directly."
@@ -57774,6 +57891,9 @@ void            json_generator_set_root         (JsonGenerator  *generator,
                                                  JsonNode       *node);
 JSON_AVAILABLE_IN_1_0
 JsonNode *      json_generator_get_root         (JsonGenerator  *generator);
+JSON_AVAILABLE_IN_1_10
+void            json_generator_take_root        (JsonGenerator  *generator,
+                                                 JsonNode       *node);
 
 JSON_AVAILABLE_IN_1_4
 GString        *json_generator_to_gstring       (JsonGenerator  *generator,
@@ -57797,13 +57917,13 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (JsonGenerator, g_object_unref)
 #endif
 
 G_END_DECLS
-
-#endif /* __JSON_GENERATOR_H__ */
 /* json-parser.h - JSON streams parser
  * 
  * This file is part of JSON-GLib
- * Copyright (C) 2007  OpenedHand Ltd.
- * Copyright (C) 2009  Intel Corp.
+ *
+ * SPDX-FileCopyrightText: 2007  OpenedHand Ltd.
+ * SPDX-FileCopyrightText: 2009  Intel Corp.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -57821,9 +57941,7 @@ G_END_DECLS
  * Author:
  *   Emmanuele Bassi  <ebassi@linux.intel.com>
  */
-
-#ifndef __JSON_PARSER_H__
-#define __JSON_PARSER_H__
+#pragma once
 
 #if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
 #error "Only <json-glib/json-glib.h> can be included directly."
@@ -57846,6 +57964,15 @@ G_BEGIN_DECLS
  */
 #define JSON_PARSER_ERROR               (json_parser_error_quark ())
 
+/**
+ * JSON_PARSER_MAX_RECURSION_DEPTH:
+ *
+ * The maximum recursion depth for a JSON tree.
+ *
+ * Since: 1.10
+ */
+#define JSON_PARSER_MAX_RECURSION_DEPTH (1024)
+
 typedef struct _JsonParser              JsonParser;
 typedef struct _JsonParserPrivate       JsonParserPrivate;
 typedef struct _JsonParserClass         JsonParserClass;
@@ -57857,8 +57984,6 @@ typedef struct _JsonParserClass         JsonParserClass;
  * @JSON_PARSER_ERROR_MISSING_COMMA: expected comma
  * @JSON_PARSER_ERROR_MISSING_COLON: expected colon
  * @JSON_PARSER_ERROR_INVALID_BAREWORD: invalid bareword
- * @JSON_PARSER_ERROR_EMPTY_MEMBER_NAME: empty member name (Since: 0.16)
- * @JSON_PARSER_ERROR_INVALID_DATA: invalid data (Since: 0.18)
  * @JSON_PARSER_ERROR_UNKNOWN: unknown error
  *
  * Error codes for `JSON_PARSER_ERROR`.
@@ -57871,10 +57996,47 @@ typedef enum {
   JSON_PARSER_ERROR_MISSING_COMMA,
   JSON_PARSER_ERROR_MISSING_COLON,
   JSON_PARSER_ERROR_INVALID_BAREWORD,
+  /**
+   * JSON_PARSER_ERROR_EMPTY_MEMBER_NAME:
+   *
+   * Empty member name.
+   *
+   * Since: 0.16
+   */
   JSON_PARSER_ERROR_EMPTY_MEMBER_NAME,
+  /**
+   * JSON_PARSER_ERROR_INVALID_DATA:
+   *
+   * Invalid data.
+   *
+   * Since: 0.18
+   */
   JSON_PARSER_ERROR_INVALID_DATA,
-
-  JSON_PARSER_ERROR_UNKNOWN
+  JSON_PARSER_ERROR_UNKNOWN,
+  /**
+   * JSON_PARSER_ERROR_NESTING:
+   *
+   * Too many levels of nesting.
+   *
+   * Since: 1.10
+   */
+  JSON_PARSER_ERROR_NESTING,
+  /**
+   * JSON_PARSER_ERROR_INVALID_STRUCTURE:
+   *
+   * Invalid structure.
+   *
+   * Since: 1.10
+   */
+  JSON_PARSER_ERROR_INVALID_STRUCTURE,
+  /**
+   * JSON_PARSER_ERROR_INVALID_ASSIGNMENT:
+   *
+   * Invalid assignment.
+   *
+   * Since: 1.10
+   */
+  JSON_PARSER_ERROR_INVALID_ASSIGNMENT
 } JsonParserError;
 
 struct _JsonParser
@@ -57947,6 +58109,11 @@ JSON_AVAILABLE_IN_1_0
 JsonParser *json_parser_new                     (void);
 JSON_AVAILABLE_IN_1_2
 JsonParser *json_parser_new_immutable           (void);
+JSON_AVAILABLE_IN_1_10
+void        json_parser_set_strict              (JsonParser           *parser,
+                                                 gboolean              strict);
+JSON_AVAILABLE_IN_1_10
+gboolean    json_parser_get_strict              (JsonParser           *parser);
 JSON_AVAILABLE_IN_1_0
 gboolean    json_parser_load_from_file          (JsonParser           *parser,
                                                  const gchar          *filename,
@@ -57994,12 +58161,12 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (JsonParser, g_object_unref)
 #endif
 
 G_END_DECLS
-
-#endif /* __JSON_PARSER_H__ */
 /* json-path.h - JSONPath implementation
  *
  * This file is part of JSON-GLib
- * Copyright © 2011  Intel Corp.
+ *
+ * SPDX-FileCopyrightText: 2011  Intel Corp.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -58018,8 +58185,7 @@ G_END_DECLS
  *   Emmanuele Bassi  <ebassi@linux.intel.com>
  */
 
-#ifndef __JSON_PATH_H__
-#define __JSON_PATH_H__
+#pragma once
 
 #if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
 #error "Only <json-glib/json-glib.h> can be included directly."
@@ -58084,12 +58250,12 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (JsonPath, g_object_unref)
 #endif
 
 G_END_DECLS
-
-#endif /* __JSON_PATH_H__ */
 /* json-reader.h - JSON cursor parser
  * 
  * This file is part of JSON-GLib
- * Copyright (C) 2010  Intel Corp.
+ *
+ * SPDX-FileCopyrightText: 2010  Intel Corp.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -58108,8 +58274,7 @@ G_END_DECLS
  *   Emmanuele Bassi  <ebassi@linux.intel.com>
  */
 
-#ifndef __JSON_READER_H__
-#define __JSON_READER_H__
+#pragma once
 
 #if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
 #error "Only <json-glib/json-glib.h> can be included directly."
@@ -58247,12 +58412,12 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (JsonReader, g_object_unref)
 #endif
 
 G_END_DECLS
-
-#endif /* __JSON_READER_H__ */
 /* json-utils.h - JSON utility API
  * 
  * This file is part of JSON-GLib
- * Copyright 2015  Emmanuele Bassi
+ *
+ * SPDX-FileCopyrightText: 2015  Emmanuele Bassi
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -58268,8 +58433,7 @@ G_END_DECLS
  * License along with this library. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __JSON_UTILS_H__
-#define __JSON_UTILS_H__
+#pragma once
 
 #if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
 #error "Only <json-glib/json-glib.h> can be included directly."
@@ -58287,39 +58451,39 @@ char *          json_to_string          (JsonNode    *node,
 
 G_END_DECLS
 
-#endif /* __JSON_UTILS_H__ */
-
 
 /* This file is generated by glib-mkenums, do not modify it. This code is licensed under the same license as the containing project. Note that it links to GLib, so must comply with the LGPL linking clauses. */
 
-#ifndef __JSON_ENUM_TYPES_H__
-#define __JSON_ENUM_TYPES_H__
-
-#if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
-#error "Only <json-glib/json-glib.h> can be included directly."
-#endif
+#pragma once
 
 
-G_BEGIN_DECLS
+            G_BEGIN_DECLS
+
 /* enumerations from "json-parser.h" */
-JSON_AVAILABLE_IN_1_0
-GType json_parser_error_get_type (void) G_GNUC_CONST;
-#define JSON_TYPE_PARSER_ERROR (json_parser_error_get_type())
-/* enumerations from "json-path.h" */
-JSON_AVAILABLE_IN_1_0
-GType json_path_error_get_type (void) G_GNUC_CONST;
-#define JSON_TYPE_PATH_ERROR (json_path_error_get_type())
-/* enumerations from "json-reader.h" */
-JSON_AVAILABLE_IN_1_0
-GType json_reader_error_get_type (void) G_GNUC_CONST;
-#define JSON_TYPE_READER_ERROR (json_reader_error_get_type())
-/* enumerations from "json-types.h" */
-JSON_AVAILABLE_IN_1_0
-GType json_node_type_get_type (void) G_GNUC_CONST;
-#define JSON_TYPE_NODE_TYPE (json_node_type_get_type())
-G_END_DECLS
 
-#endif /* !__JSON_ENUM_TYPES_H__ */
+JSON_AVAILABLE_IN_1_0
+GType json_parser_error_get_type (void);
+#define JSON_TYPE_PARSER_ERROR (json_parser_error_get_type())
+
+/* enumerations from "json-path.h" */
+
+JSON_AVAILABLE_IN_1_0
+GType json_path_error_get_type (void);
+#define JSON_TYPE_PATH_ERROR (json_path_error_get_type())
+
+/* enumerations from "json-reader.h" */
+
+JSON_AVAILABLE_IN_1_0
+GType json_reader_error_get_type (void);
+#define JSON_TYPE_READER_ERROR (json_reader_error_get_type())
+
+/* enumerations from "json-types.h" */
+
+JSON_AVAILABLE_IN_1_0
+GType json_node_type_get_type (void);
+#define JSON_TYPE_NODE_TYPE (json_node_type_get_type())
+
+G_END_DECLS
 
 /* Generated data ends here */
 
@@ -58327,8 +58491,10 @@ G_END_DECLS
 /* json-gobject.h - JSON GObject integration
  * 
  * This file is part of JSON-GLib
- * Copyright (C) 2007  OpenedHand Ltd.
- * Copyright (C) 2009  Intel Corp.
+ *
+ * SPDX-FileCopyrightText: 2007  OpenedHand Ltd.
+ * SPDX-FileCopyrightText: 2009  Intel Corp.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -58347,8 +58513,7 @@ G_END_DECLS
  *   Emmanuele Bassi  <ebassi@linux.intel.com>
  */
 
-#ifndef __JSON_GOBJECT_H__
-#define __JSON_GOBJECT_H__
+#pragma once
 
 
 G_BEGIN_DECLS
@@ -58575,13 +58740,13 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (JsonSerializable, g_object_unref)
 
 G_END_DECLS
 
-#endif /* __JSON_GOBJECT_H__ */
-
 /* json-gvariant.h - JSON GVariant integration
  *
  * This file is part of JSON-GLib
- * Copyright (C) 2007  OpenedHand Ltd.
- * Copyright (C) 2009  Intel Corp.
+ *
+ * SPDX-FileCopyrightText: 2007  OpenedHand Ltd.
+ * SPDX-FileCopyrightText: 2009  Intel Corp.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -58600,8 +58765,7 @@ G_END_DECLS
  *   Eduardo Lima Mitev  <elima@igalia.com>
  */
 
-#ifndef __JSON_GVARIANT_H__
-#define __JSON_GVARIANT_H__
+#pragma once
 
 #if !defined(__JSON_GLIB_INSIDE__) && !defined(JSON_COMPILATION)
 #error "Only <json-glib/json-glib.h> can be included directly."
@@ -58628,11 +58792,26 @@ GVariant * json_gvariant_deserialize_data (const gchar  *json,
 
 G_END_DECLS
 
-#endif /* __JSON_GVARIANT_H__ */
-
 #undef __JSON_GLIB_INSIDE__
 
-#endif /* __JSON_GLIB_H__ */
+#define FRIDA_VERSION "17.7.3"
+
+#define FRIDA_MAJOR_VERSION 17
+#define FRIDA_MINOR_VERSION 7
+#define FRIDA_MICRO_VERSION 3
+#define FRIDA_NANO_VERSION 0
+
+#define FRIDA_CHECK_VERSION(maj, min, mic) \
+    (FRIDA_CURRENT_VERSION >= FRIDA_VERSION_ENCODE ((maj), (min), (mic)))
+
+#define FRIDA_CURRENT_VERSION \
+    FRIDA_VERSION_ENCODE (    \
+        FRIDA_MAJOR_VERSION,  \
+        FRIDA_MINOR_VERSION,  \
+        FRIDA_MICRO_VERSION)
+
+#define FRIDA_VERSION_ENCODE(maj, min, mic) \
+    (((maj) * 1000000U) + ((min) * 1000U) + (mic))
 
 G_BEGIN_DECLS
 
@@ -58657,7 +58836,6 @@ typedef struct _FridaChild FridaChild;
 typedef struct _FridaCrash FridaCrash;
 typedef struct _FridaBus FridaBus;
 typedef struct _FridaService FridaService;
-typedef struct _FridaServiceIface FridaServiceIface;
 typedef struct _FridaSession FridaSession;
 typedef struct _FridaScript FridaScript;
 typedef struct _FridaSnapshotOptions FridaSnapshotOptions;
@@ -58670,7 +58848,14 @@ typedef struct _FridaRpcClient FridaRpcClient;
 typedef struct _FridaRpcPeer FridaRpcPeer;
 typedef struct _FridaRpcPeerIface FridaRpcPeerIface;
 typedef struct _FridaInjector FridaInjector;
-typedef struct _FridaControlService FridaControlService;
+typedef struct _FridaInjectorIface FridaInjectorIface;
+typedef struct _FridaPackageManager FridaPackageManager;
+typedef struct _FridaPackage FridaPackage;
+typedef struct _FridaPackageList FridaPackageList;
+typedef struct _FridaPackageSearchOptions FridaPackageSearchOptions;
+typedef struct _FridaPackageSearchResult FridaPackageSearchResult;
+typedef struct _FridaPackageInstallOptions FridaPackageInstallOptions;
+typedef struct _FridaPackageInstallResult FridaPackageInstallResult;
 typedef struct _FridaControlService FridaControlService;
 typedef struct _FridaControlServiceOptions FridaControlServiceOptions;
 typedef struct _FridaPortalService FridaPortalService;
@@ -58683,7 +58868,6 @@ typedef struct _FridaCompiler FridaCompiler;
 typedef struct _FridaCompilerOptions FridaCompilerOptions;
 typedef struct _FridaBuildOptions FridaBuildOptions;
 typedef struct _FridaWatchOptions FridaWatchOptions;
-typedef struct _FridaHostSession FridaHostSession;
 
 typedef enum {
   FRIDA_RUNTIME_GLIB,
@@ -58697,6 +58881,41 @@ typedef enum {
 } FridaDeviceType;
 
 typedef enum {
+  FRIDA_PACKAGE_INSTALL_PHASE_INITIALIZING,
+  FRIDA_PACKAGE_INSTALL_PHASE_PREPARING_DEPENDENCIES,
+  FRIDA_PACKAGE_INSTALL_PHASE_RESOLVING_PACKAGE,
+  FRIDA_PACKAGE_INSTALL_PHASE_FETCHING_RESOURCE,
+  FRIDA_PACKAGE_INSTALL_PHASE_PACKAGE_ALREADY_INSTALLED,
+  FRIDA_PACKAGE_INSTALL_PHASE_DOWNLOADING_PACKAGE,
+  FRIDA_PACKAGE_INSTALL_PHASE_PACKAGE_INSTALLED,
+  FRIDA_PACKAGE_INSTALL_PHASE_RESOLVING_AND_INSTALLING_ALL,
+  FRIDA_PACKAGE_INSTALL_PHASE_COMPLETE
+} FridaPackageInstallPhase;
+
+typedef enum {
+  FRIDA_PACKAGE_ROLE_RUNTIME,
+  FRIDA_PACKAGE_ROLE_DEVELOPMENT,
+  FRIDA_PACKAGE_ROLE_OPTIONAL,
+  FRIDA_PACKAGE_ROLE_PEER
+} FridaPackageRole;
+
+typedef enum {
+  FRIDA_OUTPUT_FORMAT_UNESCAPED,
+  FRIDA_OUTPUT_FORMAT_HEX_BYTES,
+  FRIDA_OUTPUT_FORMAT_C_STRING
+} FridaOutputFormat;
+
+typedef enum {
+  FRIDA_BUNDLE_FORMAT_ESM,
+  FRIDA_BUNDLE_FORMAT_IIFE
+} FridaBundleFormat;
+
+typedef enum {
+  FRIDA_TYPE_CHECK_MODE_FULL,
+  FRIDA_TYPE_CHECK_MODE_NONE
+} FridaTypeCheckMode;
+
+typedef enum {
   FRIDA_SOURCE_MAPS_INCLUDED,
   FRIDA_SOURCE_MAPS_OMITTED
 } FridaSourceMaps;
@@ -58707,9 +58926,10 @@ typedef enum {
 } FridaJsCompression;
 
 typedef enum {
-  FRIDA_AGENT_MESSAGE_KIND_SCRIPT = 1,
-  FRIDA_AGENT_MESSAGE_KIND_DEBUGGER
-} FridaAgentMessageKind;
+  FRIDA_JS_PLATFORM_GUM,
+  FRIDA_JS_PLATFORM_BROWSER,
+  FRIDA_JS_PLATFORM_NEUTRAL
+} FridaJsPlatform;
 
 typedef enum {
   FRIDA_CHILD_ORIGIN_FORK,
@@ -58718,16 +58938,11 @@ typedef enum {
 } FridaChildOrigin;
 
 typedef enum {
-  FRIDA_PEER_SETUP_ACTIVE,
-  FRIDA_PEER_SETUP_PASSIVE,
-  FRIDA_PEER_SETUP_ACTPASS,
-  FRIDA_PEER_SETUP_HOLDCONN
-} FridaPeerSetup;
-
-typedef enum {
-  FRIDA_PORT_CONFLICT_BEHAVIOR_FAIL,
-  FRIDA_PORT_CONFLICT_BEHAVIOR_PICK_NEXT
-} FridaPortConflictBehavior;
+  FRIDA_GADGET_BREAKPOINT_ACTION_INVOKE_RETURN,
+  FRIDA_GADGET_BREAKPOINT_ACTION_RESUME,
+  FRIDA_GADGET_BREAKPOINT_ACTION_DETACH,
+  FRIDA_GADGET_BREAKPOINT_ACTION_PAGE_PLAN
+} FridaGadgetBreakpointAction;
 
 typedef enum {
   FRIDA_REALM_NATIVE,
@@ -58770,27 +58985,6 @@ typedef enum {
   FRIDA_STDIO_PIPE
 } FridaStdio;
 
-typedef enum {
-  FRIDA_STRING_TERMINATOR_NONE,
-  FRIDA_STRING_TERMINATOR_NUL
-} FridaStringTerminator;
-
-typedef enum {
-  FRIDA_UNLOAD_POLICY_IMMEDIATE,
-  FRIDA_UNLOAD_POLICY_RESIDENT,
-  FRIDA_UNLOAD_POLICY_DEFERRED
-} FridaUnloadPolicy;
-
-typedef enum {
-  FRIDA_WEB_SERVICE_FLAVOR_CONTROL,
-  FRIDA_WEB_SERVICE_FLAVOR_CLUSTER
-} FridaWebServiceFlavor;
-
-typedef enum {
-  FRIDA_WEB_SERVICE_TRANSPORT_PLAIN,
-  FRIDA_WEB_SERVICE_TRANSPORT_TLS
-} FridaWebServiceTransport;
-
 /* Library lifetime */
 void frida_init (void);
 void frida_shutdown (void);
@@ -58808,7 +59002,11 @@ const gchar * frida_version_string (void);
 typedef gboolean (* FridaDeviceManagerPredicate) (FridaDevice * device, gpointer user_data);
 
 FridaDeviceManager * frida_device_manager_new (void);
+FridaDeviceManager * frida_device_manager_new_with_nonlocal_backends_only (void);
+FridaDeviceManager * frida_device_manager_new_with_socket_backend_only (void);
 
+FridaDeviceManager * frida_device_manager_construct_with_nonlocal_backends_only (GType object_type);
+FridaDeviceManager * frida_device_manager_construct_with_socket_backend_only (GType object_type);
 void frida_device_manager_close (FridaDeviceManager * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 void frida_device_manager_close_finish (FridaDeviceManager * self, GAsyncResult * result, GError ** error);
 void frida_device_manager_close_sync (FridaDeviceManager * self, GCancellable * cancellable, GError ** error);
@@ -58852,7 +59050,6 @@ const gchar * frida_device_get_name (FridaDevice * self);
 GVariant * frida_device_get_icon (FridaDevice * self);
 FridaDeviceType frida_device_get_dtype (FridaDevice * self);
 FridaBus * frida_device_get_bus (FridaDevice * self);
-FridaDeviceManager * frida_device_get_manager (FridaDevice * self);
 
 gboolean frida_device_is_lost (FridaDevice * self);
 void frida_device_query_system_parameters (FridaDevice * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
@@ -58927,9 +59124,6 @@ FridaService * frida_device_open_service_sync (FridaDevice * self, const gchar *
 void frida_device_unpair (FridaDevice * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 void frida_device_unpair_finish (FridaDevice * self, GAsyncResult * result, GError ** error);
 void frida_device_unpair_sync (FridaDevice * self, GCancellable * cancellable, GError ** error);
-void frida_device_get_host_session (FridaDevice * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
-FridaHostSession * frida_device_get_host_session_finish (FridaDevice * self, GAsyncResult * result, GError ** error);
-FridaHostSession * frida_device_get_host_session_sync (FridaDevice * self, GCancellable * cancellable, GError ** error);
 
 /* RemoteDeviceOptions */
 FridaRemoteDeviceOptions * frida_remote_device_options_new (void);
@@ -59056,8 +59250,6 @@ const gchar * frida_crash_get_report (FridaCrash * self);
 GHashTable * frida_crash_get_parameters (FridaCrash * self);
 
 /* Bus */
-FridaDevice * frida_bus_get_device (FridaBus * self);
-
 gboolean frida_bus_is_detached (FridaBus * self);
 void frida_bus_attach (FridaBus * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 void frida_bus_attach_finish (FridaBus * self, GAsyncResult * result, GError ** error);
@@ -59065,17 +59257,6 @@ void frida_bus_attach_sync (FridaBus * self, GCancellable * cancellable, GError 
 void frida_bus_post (FridaBus * self, const gchar * json, GBytes * data);
 
 /* Service */
-struct _FridaServiceIface {
-  GTypeInterface parent_iface;
-  gboolean (* is_closed) (FridaService * self);
-  void (* activate) (FridaService * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
-  void (* activate_finish) (FridaService * self, GAsyncResult * result, GError ** error);
-  void (* cancel) (FridaService * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
-  void (* cancel_finish) (FridaService * self, GAsyncResult * result, GError ** error);
-  void (* request) (FridaService * self, GVariant * parameters, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
-  GVariant * (* request_finish) (FridaService * self, GAsyncResult * result, GError ** error);
-};
-
 gboolean frida_service_is_closed (FridaService * self);
 void frida_service_activate (FridaService * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 void frida_service_activate_finish (FridaService * self, GAsyncResult * result, GError ** error);
@@ -59090,7 +59271,6 @@ GVariant * frida_service_request_sync (FridaService * self, GVariant * parameter
 /* Session */
 guint frida_session_get_pid (FridaSession * self);
 guint frida_session_get_persist_timeout (FridaSession * self);
-FridaDevice * frida_session_get_device (FridaSession * self);
 
 gboolean frida_session_is_detached (FridaSession * self);
 void frida_session_detach (FridaSession * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
@@ -59195,8 +59375,6 @@ void frida_portal_options_set_token (FridaPortalOptions * self, const gchar * va
 void frida_portal_options_set_acl (FridaPortalOptions * self, gchar ** value, gint value_length);
 
 /* PortalMembership */
-guint frida_portal_membership_get_id (FridaPortalMembership * self);
-
 void frida_portal_membership_terminate (FridaPortalMembership * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 void frida_portal_membership_terminate_finish (FridaPortalMembership * self, GAsyncResult * result, GError ** error);
 void frida_portal_membership_terminate_sync (FridaPortalMembership * self, GCancellable * cancellable, GError ** error);
@@ -59221,6 +59399,22 @@ void frida_rpc_peer_post_rpc_message (FridaRpcPeer * self, const gchar * json, G
 void frida_rpc_peer_post_rpc_message_finish (FridaRpcPeer * self, GAsyncResult * result, GError ** error);
 
 /* Injector */
+struct _FridaInjectorIface {
+  GTypeInterface parent_iface;
+  void (* close) (FridaInjector * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+  void (* close_finish) (FridaInjector * self, GAsyncResult * result, GError ** error);
+  void (* inject_library_file) (FridaInjector * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+  guint (* inject_library_file_finish) (FridaInjector * self, GAsyncResult * result, GError ** error);
+  void (* inject_library_blob) (FridaInjector * self, guint pid, GBytes * blob, const gchar * entrypoint, const gchar * data, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+  guint (* inject_library_blob_finish) (FridaInjector * self, GAsyncResult * result, GError ** error);
+  void (* demonitor) (FridaInjector * self, guint id, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+  void (* demonitor_finish) (FridaInjector * self, GAsyncResult * result, GError ** error);
+  void (* demonitor_and_clone_state) (FridaInjector * self, guint id, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+  guint (* demonitor_and_clone_state_finish) (FridaInjector * self, GAsyncResult * result, GError ** error);
+  void (* recreate_thread) (FridaInjector * self, guint pid, guint id, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+  void (* recreate_thread_finish) (FridaInjector * self, GAsyncResult * result, GError ** error);
+};
+
 FridaInjector * frida_injector_new (void);
 FridaInjector * frida_injector_new_inprocess (void);
 
@@ -59243,22 +59437,72 @@ void frida_injector_recreate_thread (FridaInjector * self, guint pid, guint id, 
 void frida_injector_recreate_thread_finish (FridaInjector * self, GAsyncResult * result, GError ** error);
 void frida_injector_recreate_thread_sync (FridaInjector * self, guint pid, guint id, GCancellable * cancellable, GError ** error);
 
-/* ControlService */
-FridaControlService * frida_control_service_new (FridaEndpointParameters * endpoint_params, FridaControlServiceOptions * options);
-FridaControlService * frida_control_service_new_with_host_session (FridaHostSession * host_session, FridaEndpointParameters * endpoint_params, FridaControlServiceOptions * options);
+/* PackageManager */
+FridaPackageManager * frida_package_manager_new (void);
 
-FridaHostSession * frida_control_service_get_host_session (FridaControlService * self);
+const gchar * frida_package_manager_get_registry (FridaPackageManager * self);
+
+void frida_package_manager_search (FridaPackageManager * self, const gchar * query, FridaPackageSearchOptions * options, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+FridaPackageSearchResult * frida_package_manager_search_finish (FridaPackageManager * self, GAsyncResult * result, GError ** error);
+FridaPackageSearchResult * frida_package_manager_search_sync (FridaPackageManager * self, const gchar * query, FridaPackageSearchOptions * options, GCancellable * cancellable, GError ** error);
+void frida_package_manager_install (FridaPackageManager * self, FridaPackageInstallOptions * options, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+FridaPackageInstallResult * frida_package_manager_install_finish (FridaPackageManager * self, GAsyncResult * result, GError ** error);
+FridaPackageInstallResult * frida_package_manager_install_sync (FridaPackageManager * self, FridaPackageInstallOptions * options, GCancellable * cancellable, GError ** error);
+void frida_package_manager_set_registry (FridaPackageManager * self, const gchar * value);
+
+/* Package */
+const gchar * frida_package_get_name (FridaPackage * self);
+const gchar * frida_package_get_version (FridaPackage * self);
+const gchar * frida_package_get_description (FridaPackage * self);
+const gchar * frida_package_get_url (FridaPackage * self);
+
+/* PackageList */
+gint frida_package_list_size (FridaPackageList * self);
+FridaPackage * frida_package_list_get (FridaPackageList * self, gint index);
+
+/* PackageSearchOptions */
+FridaPackageSearchOptions * frida_package_search_options_new (void);
+
+guint frida_package_search_options_get_offset (FridaPackageSearchOptions * self);
+guint frida_package_search_options_get_limit (FridaPackageSearchOptions * self);
+
+void frida_package_search_options_set_offset (FridaPackageSearchOptions * self, guint value);
+void frida_package_search_options_set_limit (FridaPackageSearchOptions * self, guint value);
+
+/* PackageSearchResult */
+FridaPackageList * frida_package_search_result_get_packages (FridaPackageSearchResult * self);
+guint frida_package_search_result_get_total (FridaPackageSearchResult * self);
+
+/* PackageInstallOptions */
+FridaPackageInstallOptions * frida_package_install_options_new (void);
+
+const gchar * frida_package_install_options_get_project_root (FridaPackageInstallOptions * self);
+FridaPackageRole frida_package_install_options_get_role (FridaPackageInstallOptions * self);
+
+void frida_package_install_options_clear_specs (FridaPackageInstallOptions * self);
+void frida_package_install_options_add_spec (FridaPackageInstallOptions * self, const gchar * spec);
+void frida_package_install_options_clear_omits (FridaPackageInstallOptions * self);
+void frida_package_install_options_add_omit (FridaPackageInstallOptions * self, FridaPackageRole role);
+void frida_package_install_options_set_project_root (FridaPackageInstallOptions * self, const gchar * value);
+void frida_package_install_options_set_role (FridaPackageInstallOptions * self, FridaPackageRole value);
+
+/* PackageInstallResult */
+FridaPackageList * frida_package_install_result_get_packages (FridaPackageInstallResult * self);
+
+/* ControlService */
+FridaControlService * frida_control_service_new (FridaEndpointParameters * endpoint_params, FridaControlServiceOptions * options, GError ** error);
+FridaControlService * frida_control_service_new_with_device_finish (GAsyncResult * result, GError ** error);
+
 FridaEndpointParameters * frida_control_service_get_endpoint_params (FridaControlService * self);
 FridaControlServiceOptions * frida_control_service_get_options (FridaControlService * self);
 
+FridaControlService * frida_control_service_construct_with_device_finish (GAsyncResult * result, GError ** error);
 void frida_control_service_start (FridaControlService * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 void frida_control_service_start_finish (FridaControlService * self, GAsyncResult * result, GError ** error);
 void frida_control_service_start_sync (FridaControlService * self, GCancellable * cancellable, GError ** error);
 void frida_control_service_stop (FridaControlService * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 void frida_control_service_stop_finish (FridaControlService * self, GAsyncResult * result, GError ** error);
 void frida_control_service_stop_sync (FridaControlService * self, GCancellable * cancellable, GError ** error);
-
-/* ControlService */
 
 /* ControlServiceOptions */
 FridaControlServiceOptions * frida_control_service_options_new (void);
@@ -59334,25 +59578,35 @@ void frida_file_monitor_disable_sync (FridaFileMonitor * self, GCancellable * ca
 /* Compiler */
 FridaCompiler * frida_compiler_new (FridaDeviceManager * manager);
 
-FridaDeviceManager * frida_compiler_get_manager (FridaCompiler * self);
-
 void frida_compiler_build (FridaCompiler * self, const gchar * entrypoint, FridaBuildOptions * options, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 gchar * frida_compiler_build_finish (FridaCompiler * self, GAsyncResult * result, GError ** error);
 gchar * frida_compiler_build_sync (FridaCompiler * self, const gchar * entrypoint, FridaBuildOptions * options, GCancellable * cancellable, GError ** error);
 void frida_compiler_watch (FridaCompiler * self, const gchar * entrypoint, FridaWatchOptions * options, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 void frida_compiler_watch_finish (FridaCompiler * self, GAsyncResult * result, GError ** error);
 void frida_compiler_watch_sync (FridaCompiler * self, const gchar * entrypoint, FridaWatchOptions * options, GCancellable * cancellable, GError ** error);
+void frida_compiler_schedule_on_frida_thread (FridaCompiler * self, GSourceFunc function, gpointer function_target, GDestroyNotify function_target_destroy_notify);
 
 /* CompilerOptions */
 FridaCompilerOptions * frida_compiler_options_new (void);
 
 const gchar * frida_compiler_options_get_project_root (FridaCompilerOptions * self);
+FridaOutputFormat frida_compiler_options_get_output_format (FridaCompilerOptions * self);
+FridaBundleFormat frida_compiler_options_get_bundle_format (FridaCompilerOptions * self);
+FridaTypeCheckMode frida_compiler_options_get_type_check (FridaCompilerOptions * self);
 FridaSourceMaps frida_compiler_options_get_source_maps (FridaCompilerOptions * self);
 FridaJsCompression frida_compiler_options_get_compression (FridaCompilerOptions * self);
+FridaJsPlatform frida_compiler_options_get_platform (FridaCompilerOptions * self);
 
+void frida_compiler_options_clear_externals (FridaCompilerOptions * self);
+void frida_compiler_options_add_external (FridaCompilerOptions * self, const gchar * external);
+void frida_compiler_options_enumerate_externals (FridaCompilerOptions * self, GFunc func, gpointer user_data);
 void frida_compiler_options_set_project_root (FridaCompilerOptions * self, const gchar * value);
+void frida_compiler_options_set_output_format (FridaCompilerOptions * self, FridaOutputFormat value);
+void frida_compiler_options_set_bundle_format (FridaCompilerOptions * self, FridaBundleFormat value);
+void frida_compiler_options_set_type_check (FridaCompilerOptions * self, FridaTypeCheckMode value);
 void frida_compiler_options_set_source_maps (FridaCompilerOptions * self, FridaSourceMaps value);
 void frida_compiler_options_set_compression (FridaCompilerOptions * self, FridaJsCompression value);
+void frida_compiler_options_set_platform (FridaCompilerOptions * self, FridaJsPlatform value);
 
 /* BuildOptions */
 FridaBuildOptions * frida_build_options_new (void);
@@ -59384,12 +59638,16 @@ typedef enum {
 /* GTypes */
 GType frida_runtime_get_type (void) G_GNUC_CONST;
 GType frida_device_type_get_type (void) G_GNUC_CONST;
+GType frida_package_install_phase_get_type (void) G_GNUC_CONST;
+GType frida_package_role_get_type (void) G_GNUC_CONST;
+GType frida_output_format_get_type (void) G_GNUC_CONST;
+GType frida_bundle_format_get_type (void) G_GNUC_CONST;
+GType frida_type_check_mode_get_type (void) G_GNUC_CONST;
 GType frida_source_maps_get_type (void) G_GNUC_CONST;
 GType frida_js_compression_get_type (void) G_GNUC_CONST;
-GType frida_agent_message_kind_get_type (void) G_GNUC_CONST;
+GType frida_js_platform_get_type (void) G_GNUC_CONST;
 GType frida_child_origin_get_type (void) G_GNUC_CONST;
-GType frida_peer_setup_get_type (void) G_GNUC_CONST;
-GType frida_port_conflict_behavior_get_type (void) G_GNUC_CONST;
+GType frida_gadget_breakpoint_action_get_type (void) G_GNUC_CONST;
 GType frida_realm_get_type (void) G_GNUC_CONST;
 GType frida_relay_kind_get_type (void) G_GNUC_CONST;
 GType frida_scope_get_type (void) G_GNUC_CONST;
@@ -59397,10 +59655,6 @@ GType frida_script_runtime_get_type (void) G_GNUC_CONST;
 GType frida_session_detach_reason_get_type (void) G_GNUC_CONST;
 GType frida_snapshot_transport_get_type (void) G_GNUC_CONST;
 GType frida_stdio_get_type (void) G_GNUC_CONST;
-GType frida_string_terminator_get_type (void) G_GNUC_CONST;
-GType frida_unload_policy_get_type (void) G_GNUC_CONST;
-GType frida_web_service_flavor_get_type (void) G_GNUC_CONST;
-GType frida_web_service_transport_get_type (void) G_GNUC_CONST;
 GType frida_device_manager_get_type (void) G_GNUC_CONST;
 GType frida_device_list_get_type (void) G_GNUC_CONST;
 GType frida_device_get_type (void) G_GNUC_CONST;
@@ -59433,6 +59687,13 @@ GType frida_portal_membership_get_type (void) G_GNUC_CONST;
 GType frida_rpc_client_get_type (void) G_GNUC_CONST;
 GType frida_rpc_peer_get_type (void) G_GNUC_CONST;
 GType frida_injector_get_type (void) G_GNUC_CONST;
+GType frida_package_manager_get_type (void) G_GNUC_CONST;
+GType frida_package_get_type (void) G_GNUC_CONST;
+GType frida_package_list_get_type (void) G_GNUC_CONST;
+GType frida_package_search_options_get_type (void) G_GNUC_CONST;
+GType frida_package_search_result_get_type (void) G_GNUC_CONST;
+GType frida_package_install_options_get_type (void) G_GNUC_CONST;
+GType frida_package_install_result_get_type (void) G_GNUC_CONST;
 GType frida_control_service_get_type (void) G_GNUC_CONST;
 GType frida_control_service_options_get_type (void) G_GNUC_CONST;
 GType frida_portal_service_get_type (void) G_GNUC_CONST;
@@ -59450,17 +59711,25 @@ GType frida_watch_options_get_type (void) G_GNUC_CONST;
 
 #define FRIDA_TYPE_DEVICE_TYPE (frida_device_type_get_type ())
 
+#define FRIDA_TYPE_PACKAGE_INSTALL_PHASE (frida_package_install_phase_get_type ())
+
+#define FRIDA_TYPE_PACKAGE_ROLE (frida_package_role_get_type ())
+
+#define FRIDA_TYPE_OUTPUT_FORMAT (frida_output_format_get_type ())
+
+#define FRIDA_TYPE_BUNDLE_FORMAT (frida_bundle_format_get_type ())
+
+#define FRIDA_TYPE_TYPE_CHECK_MODE (frida_type_check_mode_get_type ())
+
 #define FRIDA_TYPE_SOURCE_MAPS (frida_source_maps_get_type ())
 
 #define FRIDA_TYPE_JS_COMPRESSION (frida_js_compression_get_type ())
 
-#define FRIDA_TYPE_AGENT_MESSAGE_KIND (frida_agent_message_kind_get_type ())
+#define FRIDA_TYPE_JS_PLATFORM (frida_js_platform_get_type ())
 
 #define FRIDA_TYPE_CHILD_ORIGIN (frida_child_origin_get_type ())
 
-#define FRIDA_TYPE_PEER_SETUP (frida_peer_setup_get_type ())
-
-#define FRIDA_TYPE_PORT_CONFLICT_BEHAVIOR (frida_port_conflict_behavior_get_type ())
+#define FRIDA_TYPE_GADGET_BREAKPOINT_ACTION (frida_gadget_breakpoint_action_get_type ())
 
 #define FRIDA_TYPE_REALM (frida_realm_get_type ())
 
@@ -59475,14 +59744,6 @@ GType frida_watch_options_get_type (void) G_GNUC_CONST;
 #define FRIDA_TYPE_SNAPSHOT_TRANSPORT (frida_snapshot_transport_get_type ())
 
 #define FRIDA_TYPE_STDIO (frida_stdio_get_type ())
-
-#define FRIDA_TYPE_STRING_TERMINATOR (frida_string_terminator_get_type ())
-
-#define FRIDA_TYPE_UNLOAD_POLICY (frida_unload_policy_get_type ())
-
-#define FRIDA_TYPE_WEB_SERVICE_FLAVOR (frida_web_service_flavor_get_type ())
-
-#define FRIDA_TYPE_WEB_SERVICE_TRANSPORT (frida_web_service_transport_get_type ())
 
 #define FRIDA_TYPE_DEVICE_MANAGER (frida_device_manager_get_type ())
 #define FRIDA_DEVICE_MANAGER(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_DEVICE_MANAGER, FridaDeviceManager))
@@ -59612,9 +59873,33 @@ GType frida_watch_options_get_type (void) G_GNUC_CONST;
 #define FRIDA_INJECTOR(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_INJECTOR, FridaInjector))
 #define FRIDA_IS_INJECTOR(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_INJECTOR))
 
-#define FRIDA_TYPE_CONTROL_SERVICE (frida_control_service_get_type ())
-#define FRIDA_CONTROL_SERVICE(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_CONTROL_SERVICE, FridaControlService))
-#define FRIDA_IS_CONTROL_SERVICE(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_CONTROL_SERVICE))
+#define FRIDA_TYPE_PACKAGE_MANAGER (frida_package_manager_get_type ())
+#define FRIDA_PACKAGE_MANAGER(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_PACKAGE_MANAGER, FridaPackageManager))
+#define FRIDA_IS_PACKAGE_MANAGER(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_PACKAGE_MANAGER))
+
+#define FRIDA_TYPE_PACKAGE (frida_package_get_type ())
+#define FRIDA_PACKAGE(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_PACKAGE, FridaPackage))
+#define FRIDA_IS_PACKAGE(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_PACKAGE))
+
+#define FRIDA_TYPE_PACKAGE_LIST (frida_package_list_get_type ())
+#define FRIDA_PACKAGE_LIST(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_PACKAGE_LIST, FridaPackageList))
+#define FRIDA_IS_PACKAGE_LIST(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_PACKAGE_LIST))
+
+#define FRIDA_TYPE_PACKAGE_SEARCH_OPTIONS (frida_package_search_options_get_type ())
+#define FRIDA_PACKAGE_SEARCH_OPTIONS(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_PACKAGE_SEARCH_OPTIONS, FridaPackageSearchOptions))
+#define FRIDA_IS_PACKAGE_SEARCH_OPTIONS(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_PACKAGE_SEARCH_OPTIONS))
+
+#define FRIDA_TYPE_PACKAGE_SEARCH_RESULT (frida_package_search_result_get_type ())
+#define FRIDA_PACKAGE_SEARCH_RESULT(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_PACKAGE_SEARCH_RESULT, FridaPackageSearchResult))
+#define FRIDA_IS_PACKAGE_SEARCH_RESULT(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_PACKAGE_SEARCH_RESULT))
+
+#define FRIDA_TYPE_PACKAGE_INSTALL_OPTIONS (frida_package_install_options_get_type ())
+#define FRIDA_PACKAGE_INSTALL_OPTIONS(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_PACKAGE_INSTALL_OPTIONS, FridaPackageInstallOptions))
+#define FRIDA_IS_PACKAGE_INSTALL_OPTIONS(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_PACKAGE_INSTALL_OPTIONS))
+
+#define FRIDA_TYPE_PACKAGE_INSTALL_RESULT (frida_package_install_result_get_type ())
+#define FRIDA_PACKAGE_INSTALL_RESULT(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_PACKAGE_INSTALL_RESULT, FridaPackageInstallResult))
+#define FRIDA_IS_PACKAGE_INSTALL_RESULT(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_PACKAGE_INSTALL_RESULT))
 
 #define FRIDA_TYPE_CONTROL_SERVICE (frida_control_service_get_type ())
 #define FRIDA_CONTROL_SERVICE(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_CONTROL_SERVICE, FridaControlService))

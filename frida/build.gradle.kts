@@ -56,8 +56,13 @@ tasks.register<Exec>("generateSwig") {
     )
 }
 
+tasks.register<Exec>("downloadFridaDevkit") {
+    workingDir = file("src/main/cpp")
+    commandLine("bash", "download_frida_devkit.sh")
+}
+
 tasks.register<Exec>("buildNative") {
-    dependsOn("generateSwig")
+    dependsOn("generateSwig", "downloadFridaDevkit")
     workingDir = file("src/main/cpp")
     commandLine("bash", "-c", "cmake -B build . && cmake --build build")
 }

@@ -1,3 +1,4 @@
+import java.nio.file.Files
 import java.util.*
 
 object NativeLoader {
@@ -10,13 +11,18 @@ object NativeLoader {
             else -> throw UnsupportedOperationException("Unsupported operating system: $osName")
         }
 
-        val libraryPath = NativeLoader::class.java
-            .getResource("/native/$osDir/libfrida_wrapper.dylib")
-            ?.file
-            ?: throw IllegalStateException("Could not find native library")
+        val libName = "libfrida_wrapper.dylib"
+        val resourcePath = "/native/$osDir/$libName"
 
-        println("Loading library from: $libraryPath")
-        System.load(libraryPath)
+        val stream = NativeLoader::class.java.getResourceAsStream(resourcePath)
+            ?: throw IllegalStateException("Could not find native library at $resourcePath")
+
+        val tempFile = Files.createTempFile("frida_wrapper", ".dylib").toFile()
+        tempFile.deleteOnExit()
+        stream.use { it.copyTo(tempFile.outputStream()) }
+
+        println("Loading library from: ${tempFile.absolutePath}")
+        System.load(tempFile.absolutePath)
         println("Library loaded successfully")
     }
 
