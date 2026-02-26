@@ -2,7 +2,7 @@ import java.util.*
 
 object NativeLoader {
     init {
-        val osName = System.getProperty("os.name").lowercase(Locale.getDefault())
+        val osName = System.getProperty("os.name").lowercase(Locale.ROOT)
         val osDir = when {
             osName.contains("mac") -> "macos"
             osName.contains("linux") -> "linux"
